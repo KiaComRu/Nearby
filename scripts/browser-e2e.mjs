@@ -10,14 +10,15 @@ for (let i = 0; i < 50; i++) {
 }
 const browser = await chromium.launch({ headless: true });
 const errors = [];
-const contexts = await Promise.all([browser.newContext({ acceptDownloads: true }), browser.newContext({ acceptDownloads: true, viewport: { width: 390, height: 844 } })]);
+const contexts = await Promise.all([browser.newContext({ acceptDownloads: true }), browser.newContext({ acceptDownloads: true, viewport: { width: 390, height: 844 }, userAgent: 'Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36' })]);
 const pages = await Promise.all(contexts.map(c => c.newPage()));
 for (const page of pages) {
   page.on('pageerror', e => errors.push(e.message));
-  // Exercise the portable download path. Disk streaming is covered separately.
-  await page.addInitScript(() => { window.showSaveFilePicker = undefined; });
 }
 const [host, guest] = pages;
+// Android can expose a picker whose handle cannot be written. Never invoke it there.
+await host.addInitScript(() => { window.showSaveFilePicker = undefined; });
+await guest.addInitScript(() => { window.pickerCalls = 0; window.showSaveFilePicker = async () => { window.pickerCalls++; return { createWritable: async () => { throw new DOMException('Platform denied writing', 'NotAllowedError'); } }; }; });
 async function transfer(from, to, name, bytes) {
   await from.locator('#files').setInputFiles({ name, mimeType: 'application/octet-stream', buffer: bytes });
   const card = to.locator('.transfer').filter({ has: to.getByText(name, { exact: true }) }).first();
@@ -50,6 +51,9 @@ try {
   assert.equal(await host.locator('#files').isDisabled(), true); await host.locator('#approve').click();
   await Promise.all(pages.map(p => p.waitForFunction(() => document.querySelector('#files').disabled === false, null, { timeout: 60000 })));
   await transfer(host, guest, 'binary-to-phone.bin', randomBytes(1024 * 1024 + 31));
+  assert.equal(await guest.evaluate(() => window.pickerCalls), 0, 'Android uses ordinary download even when picker exists');
+  assert.ok((await host.locator('#file-limit').textContent()).includes('100.0 МиБ'));
+  assert.ok((await guest.locator('#save-hint').textContent()).includes('Сохранить файл'));
   await transfer(guest, host, 'файл-на-компьютер.bin', randomBytes(65536 + 3));
   await transfer(host, guest, 'empty.txt', Buffer.alloc(0));
   await host.locator('#files').setInputFiles({ name: 'declined.txt', mimeType: 'text/plain', buffer: Buffer.from('decline me') });
@@ -74,6 +78,33 @@ try {
   await diskPage.getByText('Сохранён в выбранный файл.', { exact: true }).waitFor({ timeout: 60000 });
   const diskHash = await diskPage.evaluate(async () => { const directory = await navigator.storage.getDirectory(); const handle = await directory.getFileHandle('stream-test.bin'); const file = await handle.getFile(); return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer())), n => n.toString(16).padStart(2, '0')).join(''); });
   assert.equal(diskHash, createHash('sha256').update(diskBytes).digest('hex')); console.log('Verified browser disk stream: 2 MiB, SHA-256 match');
+  // Reproduce createWritable() denial from the Android report in a picker-enabled context.
+  await diskPage.evaluate(() => { window.showSaveFilePicker = async () => ({ createWritable: async () => { throw new DOMException('The request is not allowed by the platform', 'NotAllowedError'); } }); });
+  await transfer(host, diskPage, 'denied-write.jpeg', randomBytes(110 * 1024));
+  await diskPage.getByText('Браузер не разрешил запись в выбранный файл. После приёма нажмите «Сохранить файл».', { exact: true }).waitFor();
+  // An unavailable picker is also recoverable, but cancelling it is not permission to receive.
+  await diskPage.evaluate(() => { window.showSaveFilePicker = async () => { throw new DOMException('Picker unavailable', 'SecurityError'); }; });
+  await transfer(host, diskPage, 'denied-picker.bin', randomBytes(65539));
+  await diskPage.evaluate(() => { window.showSaveFilePicker = async () => { throw new DOMException('User cancelled', 'AbortError'); }; });
+  await host.locator('#files').setInputFiles({ name: 'cancel-picker.txt', mimeType: 'text/plain', buffer: Buffer.from('cancel me') });
+  const cancelled = diskPage.locator('.transfer').filter({ has: diskPage.getByText('cancel-picker.txt', { exact: true }) });
+  await cancelled.getByRole('button', { name: 'Принять', exact: true }).click();
+  await cancelled.getByText('Сохранение отменено.', { exact: true }).waitFor();
+  assert.equal(await cancelled.getByRole('link', { name: 'Сохранить файл' }).count(), 0);
+  await host.waitForFunction(() => !document.querySelector('#files').disabled);
+  // No file bytes are sent when the denied disk path would exceed the memory limit.
+  await diskPage.evaluate(() => { window.showSaveFilePicker = async () => ({ createWritable: async () => { throw new DOMException('Denied', 'NotAllowedError'); } }); });
+  await host.evaluate(() => {
+    const files = new DataTransfer(); files.items.add(new File([new ArrayBuffer(100 * 1024 ** 2 + 1)], 'too-large.bin'));
+    const input = document.querySelector('#files'); input.files = files.files; input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  const tooLarge = diskPage.locator('.transfer').filter({ has: diskPage.getByText('too-large.bin', { exact: true }) });
+  await tooLarge.getByRole('button', { name: 'Принять', exact: true }).click();
+  await tooLarge.getByText('Для обычного скачивания доступны файлы до 100 МиБ.', { exact: false }).waitFor();
+  assert.equal(await tooLarge.getByRole('link', { name: 'Сохранить файл' }).count(), 0);
+  await host.waitForFunction(() => !document.querySelector('#files').disabled);
+  await transfer(host, diskPage, 'after-fallback-refusal.bin', randomBytes(16391));
+  console.log('Verified picker/write denial fallback, download hashes, cancellation, 100 MiB bound and next transfer');
   await diskPage.locator('#disconnect').click();
   assert.deepEqual(errors, []); console.log('Browser E2E passed: pairing, both directions, binary hash, empty file, refusal, disconnect, mobile layout.');
 } catch (error) {

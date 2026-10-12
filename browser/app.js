@@ -1,6 +1,8 @@
 import { FileLink, MEMORY_LIMIT, DISK_LIMIT, validateFileSpec } from './transfer.mjs';
 const $ = id => document.getElementById(id);
-const diskSupported = typeof window.showSaveFilePicker === 'function';
+// Some mobile browsers expose the picker but cannot write to its selected handle.
+const mobileDevice = navigator.userAgentData?.mobile === true || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (/Mac/i.test(navigator.platform || '') && navigator.maxTouchPoints > 1);
+const diskSupported = !mobileDevice && typeof window.showSaveFilePicker === 'function';
 const ownLimit = diskSupported ? DISK_LIMIT : MEMORY_LIMIT;
 const rows = new Map(), objectUrls = new Set();
 let session = null, peer = null, link = null, pollTimer, connectionTimer, cursor = 0, started = false, sending = false, incomingCandidates = [], stopped = false;
@@ -178,6 +180,14 @@ function rowFor(spec, direction) {
 }
 function button(label, action, primary = false) { const b = document.createElement('button'); b.className = `button ${primary ? 'primary' : 'secondary'}`; b.textContent = label; b.onclick = action; return b; }
 function cancelButton(id, actions) { actions.append(button('Отменить', () => link.cancel(id))); }
+function memorySink(spec, row) {
+  if (spec.size > MEMORY_LIMIT) throw new Error('Для обычного скачивания доступны файлы до 100 МиБ. Для больших файлов используйте Chrome/Edge на ПК с разрешённой записью на диск.');
+  if (bufferedBytes + spec.size > MEMORY_LIMIT) throw new Error('Сначала сохраните принятые файлы и нажмите «Убрать из памяти». Вкладка хранит не более 100 МиБ.');
+  bufferedBytes += spec.size;
+  let parts = [], reserved = true;
+  row.releaseMemory = () => { if (reserved) { bufferedBytes -= spec.size; reserved = false; } };
+  return { write: async data => { parts.push(data); }, close: async () => { const blob = new Blob(parts, { type: 'application/octet-stream' }); parts = []; return blob; }, abort: async () => { parts = []; row.releaseMemory(); } };
+}
 async function showIncoming(spec) {
   const row = rowFor(spec, 'incoming');
   row.actions.append(button('Принять', async event => {
@@ -185,17 +195,18 @@ async function showIncoming(spec) {
     try {
       let sink;
       if (diskSupported) {
-        const handle = await showSaveFilePicker({ suggestedName: spec.name });
-        const writable = await handle.createWritable();
-        sink = { write: data => writable.write(data), close: async () => { await writable.close(); return null; }, abort: () => writable.abort() };
-      } else {
-        if (spec.size > MEMORY_LIMIT) throw new Error('Этот браузер принимает файлы до 100 МиБ. Для больших файлов используйте Chrome/Edge на ПК.');
-        if (bufferedBytes + spec.size > MEMORY_LIMIT) throw new Error('Сначала сохраните принятые файлы и нажмите «Убрать из памяти». Вкладка хранит не более 100 МиБ.');
-        bufferedBytes += spec.size;
-        let parts = [], reserved = true;
-        row.releaseMemory = () => { if (reserved) { bufferedBytes -= spec.size; reserved = false; } };
-        sink = { write: async data => { parts.push(data); }, close: async () => { const blob = new Blob(parts, { type: 'application/octet-stream' }); parts = []; return blob; }, abort: async () => { parts = []; row.releaseMemory(); } };
+        try {
+          const handle = await showSaveFilePicker({ suggestedName: spec.name });
+          const writable = await handle.createWritable();
+          sink = { write: data => writable.write(data), close: async () => { await writable.close(); return null; }, abort: () => writable.abort() };
+        } catch (error) {
+          // Cancelling the dialog must cancel reception, rather than silently accepting.
+          if (!['NotAllowedError', 'SecurityError', 'NotSupportedError', 'TypeError'].includes(error.name)) throw error;
+          sink = memorySink(spec, row);
+          notice('Браузер не разрешил запись в выбранный файл. После приёма нажмите «Сохранить файл».');
+        }
       }
+      sink ||= memorySink(spec, row);
       await link.accept(spec.id, sink); row.actions.replaceChildren(); cancelButton(spec.id, row.actions);
     } catch (error) { link.cancel(spec.id, error.name === 'AbortError' ? 'Сохранение отменено.' : error.message); }
   }, true), button('Отклонить', () => link.cancel(spec.id, 'Файл отклонён.')));
