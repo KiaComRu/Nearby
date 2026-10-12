@@ -1,0 +1,16 @@
+node_modules/
+storage/
+*.log
+.DS_Store
+.build-tools/
+dist/
+artifacts/
+
+landing/
+.env*
+!.env.example
+*.user
+*.suo
+
+Сохранить-доступ-Sweb.cmd
+*.clixml

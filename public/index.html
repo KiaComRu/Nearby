@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#111916">
+  <title>Nearby — файлы рядом</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header><a class="brand" href="/">↗ <span>nearby<span class="dot">.</span></span></a><span class="badge">Локальная передача · прототип</span></header>
+  <main>
+    <div class="intro"><div class="eyebrow">ОДНА СЕТЬ. ЛЮБЫЕ ФАЙЛЫ.</div><h1>Ближе устройства.<br><span>Быстрее передача.</span></h1><p>С компьютера на телефон и обратно.<br>Без аккаунтов, облака и подключения к интернету.</p></div>
+    <p id="message" class="notice" role="status" aria-live="polite" hidden></p>
+    <section id="join" class="panel" hidden>
+      <div class="step">01 / ПОДКЛЮЧЕНИЕ</div><h2>Давайте познакомим устройства</h2>
+      <p>Введите PIN из окна владельца на компьютере.</p>
+      <form id="join-form"><label for="device">Имя этого устройства</label><input id="device" maxlength="60" value="Моё устройство" required autocomplete="off"><label for="pin">PIN подключения</label><input id="pin" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="000000" required autocomplete="off"><button type="submit">Подключиться <span>↗</span></button></form>
+    </section>
+    <div id="workspace" hidden>
+      <section id="connection" class="panel connection" hidden>
+        <div class="connection-info"><div class="step">01 / ПОДКЛЮЧЕНИЕ</div><h2>Пригласите второе устройство</h2><p>Подключите его к той же Wi-Fi сети и отсканируйте QR-код камерой.</p><label for="address">Или откройте этот адрес в браузере</label><select id="address"></select><div class="pin-line">PIN подключения <strong id="shown-pin"></strong></div></div><div class="qr"><img id="qr" alt="QR-код для подключения второго устройства" width="200" height="200"><span>Наведите камеру телефона</span></div>
+      </section>
+      <div class="columns">
+        <section class="panel"><div class="step">02 / ОТПРАВКА</div><h2 id="send-title">Отправить на компьютер</h2><p id="send-description">Выберите файлы. Получатель подтвердит приём на компьютере.</p><label class="drop" id="drop"><span class="upload-icon">↥</span><strong>Выберите файлы</strong><span>или перетащите их сюда</span><input type="file" id="files" multiple></label><div id="queue" class="file-list" aria-live="polite"></div><p class="subtle" id="save-hint"></p></section>
+        <section class="panel"><div class="step">03 / ПОЛУЧЕНИЕ</div><h2 id="receive-title">Файлы для вас</h2><p id="receive-description">Файлы, которыми поделился владелец компьютера.</p><div id="received-location" class="received-location" hidden><strong>Папка для полученных файлов</strong><div id="received-path" class="received-path"></div><button id="open-received" type="button">Открыть папку</button></div><div id="incoming" class="file-list"></div><div id="shared" class="file-list"></div></section>
+      </div>
+      <section class="panel history"><div class="step">АКТИВНОСТЬ</div><h2>Передачи</h2><div id="history" class="file-list"></div></section>
+    </div>
+    <footer><span class="online-dot"></span> Напрямую по вашей сети <span class="footer-separator">/</span> Используйте доверенную Wi-Fi сеть: прототип передаёт данные без шифрования.</footer>
+  </main>
+</body>
+</html>
