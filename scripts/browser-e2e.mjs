@@ -33,10 +33,21 @@ async function transfer(from, to, name, bytes) {
   await card.getByRole('button', { name: 'Убрать из памяти' }).click();
 }
 try {
-  await host.goto(target); await host.locator('#device-name').fill('Тестовый Windows'); await host.locator('#create').click();
+  await host.goto(target);
+  await host.waitForFunction(() => document.querySelector('#device-name').value.includes(' · '));
+  const generatedName = await host.locator('#device-name').inputValue();
+  await host.reload();
+  await host.waitForFunction(name => document.querySelector('#device-name').value === name, generatedName);
+  await host.locator('#device-name').fill('Тестовый Windows');
+  await host.reload();
+  await host.waitForFunction(() => document.querySelector('#device-name').value === 'Тестовый Windows');
+  await host.locator('#create').click();
   await host.locator('#share-link').waitFor(); const invitation = await host.locator('#share-link').inputValue(); assert.ok(invitation.includes('#room='));
   await guest.goto(invitation); await guest.locator('#device-name').fill('Тестовый телефон'); await guest.locator('#join-invite').click();
-  await host.locator('#approve').waitFor(); assert.equal(await host.locator('#files').isDisabled(), true); await host.locator('#approve').click();
+  await host.locator('#approve').waitFor();
+  assert.equal(await host.locator('#peer-name').textContent(), 'Тестовый телефон');
+  assert.ok((await guest.locator('#connection-detail').textContent()).includes('Тестовый Windows'));
+  assert.equal(await host.locator('#files').isDisabled(), true); await host.locator('#approve').click();
   await Promise.all(pages.map(p => p.waitForFunction(() => document.querySelector('#files').disabled === false, null, { timeout: 60000 })));
   await transfer(host, guest, 'binary-to-phone.bin', randomBytes(1024 * 1024 + 31));
   await transfer(guest, host, 'файл-на-компьютер.bin', randomBytes(65536 + 3));

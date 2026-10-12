@@ -6,7 +6,7 @@
   <meta name="description" content="Nearby в браузере: передавайте файлы между компьютером и телефоном без установки. Подключение по QR-коду и подтверждение приёма.">
   <title>Nearby — передача в браузере</title>
   <link rel="stylesheet" href="styles.css">
-  <script defer src="vendor/qrcode.js"></script><script type="module" src="app.js"></script>
+  <script defer src="vendor/qrcode.js"></script><script type="module" src="app.js?v=device-name-1"></script>
 </head>
 <body>
   <header class="header"><a class="brand" href="/" aria-label="Nearby — главная"><span class="mark">∿</span>nearby<span class="dot">.</span></a><span class="badge">БРАУЗЕРНАЯ ВЕРСИЯ · БЕТА</span><a class="source" href="https://github.com/KiaComRu/Nearby" target="_blank" rel="noopener noreferrer">GitHub ↗</a></header>
@@ -15,7 +15,7 @@
     <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
     <section id="start" class="panel start-panel">
       <div><span class="step">01 / НАЧНИТЕ ЗДЕСЬ</span><h2>Свяжите два устройства</h2><p class="muted">Приглашение действует 15 минут. Передача начнётся только после подтверждения.</p></div>
-      <label class="label" for="device-name">Как назвать это устройство</label><input id="device-name" maxlength="40" autocomplete="off" placeholder="Например, мой компьютер">
+      <label class="label" for="device-name">Имя устройства — можно изменить</label><input id="device-name" maxlength="40" autocomplete="off" placeholder="Название устройства">
       <button id="create" class="button primary">Создать подключение <span>↗</span></button>
       <div class="divider">УЖЕ ЕСТЬ ПРИГЛАШЕНИЕ?</div>
       <form id="join-form"><label class="label" for="invite-input">Ссылка с другого устройства</label><div class="input-row"><input id="invite-input" type="text" autocomplete="off" spellcheck="false" placeholder="Вставьте ссылку-приглашение" required><button class="button secondary" type="submit">Подключиться</button></div></form>

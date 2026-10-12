@@ -9,7 +9,39 @@ let bufferedBytes = 0;
 const sizes = n => n < 1024 ? `${n} Б` : n < 1024 ** 2 ? `${(n / 1024).toFixed(1)} КиБ` : n < 1024 ** 3 ? `${(n / 1024 ** 2).toFixed(1)} МиБ` : `${(n / 1024 ** 3).toFixed(1)} ГиБ`;
 function notice(text, error = false) { $('notice').textContent = text; $('notice').classList.toggle('error', error); $('notice').hidden = !text; }
 function status(title, detail, connected = false) { $('connection-title').textContent = title; $('connection-detail').textContent = detail; $('status-dot').classList.toggle('connected', connected); }
-function deviceName() { return $('device-name').value.trim() || (/iPhone|iPad/.test(navigator.userAgent) ? 'iPhone / iPad' : /Android/.test(navigator.userAgent) ? 'Android' : 'Мой компьютер'); }
+const nameStorageKey = 'nearby.device-name';
+function cleanDeviceName(value) { return typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 40) : ''; }
+function suggestedDeviceName() {
+  const ua = navigator.userAgent || '';
+  const platform = navigator.userAgentData?.platform || navigator.platform || '';
+  const device = /iPhone|iPod/i.test(ua) ? 'iPhone'
+    : /iPad/i.test(ua) || (/Mac/i.test(platform) && navigator.maxTouchPoints > 1) ? 'iPad'
+    : /Android/i.test(ua + platform) ? 'Android'
+    : /Win/i.test(platform + ua) ? 'Windows'
+    : /Mac/i.test(platform + ua) ? 'Mac'
+    : /Linux/i.test(platform + ua) ? 'Linux' : 'Устройство';
+  const names = ['Луна', 'Клён', 'Маяк', 'Облако', 'Искра', 'Ветер', 'Сосна', 'Комета', 'Ручей', 'Сокол', 'Кедр', 'Луч'];
+  const random = new Uint32Array(1);
+  if (globalThis.crypto?.getRandomValues) crypto.getRandomValues(random);
+  else random[0] = Math.floor(Math.random() * 2 ** 32);
+  return `${device} · ${names[random[0] % names.length]}`;
+}
+let initialDeviceName = '';
+try { initialDeviceName = cleanDeviceName(localStorage.getItem(nameStorageKey)); } catch { /* Storage may be disabled. */ }
+initialDeviceName ||= suggestedDeviceName();
+$('device-name').value = initialDeviceName;
+function rememberDeviceName() {
+  const name = cleanDeviceName($('device-name').value);
+  try { if (name) localStorage.setItem(nameStorageKey, name); } catch { /* Naming still works without storage. */ }
+}
+function deviceName() {
+  $('device-name').value = cleanDeviceName($('device-name').value) || initialDeviceName;
+  rememberDeviceName();
+  return $('device-name').value;
+}
+$('device-name').addEventListener('input', rememberDeviceName);
+$('device-name').addEventListener('blur', deviceName);
+rememberDeviceName();
 async function api(action, extra = {}, anonymous = false) {
   const response = await fetch('api.php', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(15000), body: JSON.stringify({ action, ...(anonymous ? {} : { room: session.room, token: session.token }), ...extra }) });
   const result = await response.json().catch(() => { throw new Error('Сервер вернул неожиданный ответ. Попробуйте позже.'); });
