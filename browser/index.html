@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#080d18"><meta name="referrer" content="no-referrer">
+  <meta name="description" content="Nearby в браузере: передавайте файлы между компьютером и телефоном без установки. Подключение по QR-коду и подтверждение приёма.">
+  <title>Nearby — передача в браузере</title>
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="vendor/qrcode.js"></script><script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="header"><a class="brand" href="/" aria-label="Nearby — главная"><span class="mark">∿</span>nearby<span class="dot">.</span></a><span class="badge">БРАУЗЕРНАЯ ВЕРСИЯ · БЕТА</span><a class="source" href="https://github.com/KiaComRu/Nearby" target="_blank" rel="noopener noreferrer">GitHub ↗</a></header>
+  <main>
+    <section class="intro"><p class="eyebrow">ВАШИ УСТРОЙСТВА. ПРЯМОЕ СОЕДИНЕНИЕ.</p><h1>Передавайте файлы.<br><em>Без установки.</em></h1><p class="lead">Откройте Nearby на двух устройствах в одной локальной сети.<br>Подключитесь по QR-коду и выберите, чем поделиться.</p></section>
+    <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+    <section id="start" class="panel start-panel">
+      <div><span class="step">01 / НАЧНИТЕ ЗДЕСЬ</span><h2>Свяжите два устройства</h2><p class="muted">Приглашение действует 15 минут. Передача начнётся только после подтверждения.</p></div>
+      <label class="label" for="device-name">Как назвать это устройство</label><input id="device-name" maxlength="40" autocomplete="off" placeholder="Например, мой компьютер">
+      <button id="create" class="button primary">Создать подключение <span>↗</span></button>
+      <div class="divider">УЖЕ ЕСТЬ ПРИГЛАШЕНИЕ?</div>
+      <form id="join-form"><label class="label" for="invite-input">Ссылка с другого устройства</label><div class="input-row"><input id="invite-input" type="text" autocomplete="off" spellcheck="false" placeholder="Вставьте ссылку-приглашение" required><button class="button secondary" type="submit">Подключиться</button></div></form>
+      <button id="join-invite" class="button primary" hidden>Подключиться к устройству <span>↗</span></button>
+    </section>
+    <section id="session" class="session-grid" hidden>
+      <aside class="panel connection-panel">
+        <span class="step">02 / СОЕДИНЕНИЕ</span><div class="connection-state"><span id="status-dot" class="status-dot"></span><h2 id="connection-title">Ожидаем устройство</h2></div><p id="connection-detail" class="muted">Откройте приглашение на втором устройстве.</p>
+        <div id="invitation"><div class="qr-wrap"><canvas id="qr" aria-label="QR-код приглашения"></canvas></div><p class="qr-help">Сканируйте камерой телефона<br>или отправьте ссылку на другое устройство.</p><button id="copy" class="button secondary full">Скопировать приглашение ↗</button><input id="share-link" class="share-link" readonly aria-label="Ссылка-приглашение"><small>Ссылка открывает доступ к подключению. Делитесь ею только с получателем.</small></div>
+        <div id="peer-request" class="peer-request" hidden><p><b id="peer-name"></b> хочет подключиться.</p><button id="approve" class="button primary full">Это моё устройство — разрешить</button><button id="reject" class="button quiet full">Отклонить и закрыть</button></div>
+        <button id="disconnect" class="button quiet full">Завершить соединение</button>
+      </aside>
+      <section class="panel files-panel"><div class="files-heading"><div><span class="step">03 / ФАЙЛЫ</span><h2>Отправляйте и принимайте</h2></div><span id="transport-label" class="transport-label">Ожидаем соединение</span></div>
+        <label id="drop" class="drop disabled"><span class="drop-icon">↥</span><strong>Выберите файлы</strong><span>или перетащите их сюда</span><input id="files" type="file" multiple disabled><span id="file-limit" class="limit">Размер зависит от браузера получателя</span></label>
+        <p id="save-hint" class="muted save-hint"></p><div id="transfers" class="transfers" aria-live="polite"><div id="empty" class="empty">Здесь появятся входящие и исходящие файлы.</div></div>
+      </section>
+    </section>
+    <section class="notes"><article><span>↔</span><h3>Напрямую</h3><p>Файлы передаются по зашифрованному WebRTC-соединению. Хостинг помогает установить связь и не хранит ваши файлы.</p></article><article><span>◎</span><h3>Под вашим контролем</h3><p>Вы подтверждаете второе устройство и каждый входящий файл. Для подключения к сайту нужен интернет.</p></article><article><span>◷</span><h3>Держите вкладки открытыми</h3><p>Не блокируйте телефон во время передачи. Гостевая Wi-Fi-сеть или VPN могут мешать прямому соединению.</p></article></section>
+  </main><footer>Nearby Web · Dev.KiaCom <a href="https://github.com/KiaComRu/Nearby/blob/main/docs/BROWSER-MODE.md" target="_blank" rel="noopener noreferrer">Как это работает ↗</a><a href="/">Скачать Windows-приложение ↗</a></footer>
+</body></html>

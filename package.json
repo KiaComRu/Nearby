@@ -10,10 +10,17 @@
   "scripts": {
     "start": "node server.mjs",
     "test": "node --test",
-    "build:windows": "powershell -NoProfile -File desktop/windows/build.ps1"
+    "build:windows": "powershell -NoProfile -File desktop/windows/build.ps1",
+    "build:web": "node browser/build.mjs",
+    "test:web": "node --test test/browser-*.test.mjs",
+    "test:browser": "node scripts/browser-e2e.mjs"
   },
   "dependencies": {
     "qrcode": "1.5.4"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "playwright": "1.62.1"
+  }
 }

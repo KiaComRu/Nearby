@@ -18,3 +18,28 @@ jobs:
       - run: npm test
       - run: node --check public/app.js
       - run: node --check desktop/windows/host.mjs
+      - run: npm run build:web
+      - run: node --check browser/app.js
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run build:web
+      - run: php -l browser/api.php
+      - run: npm run test:web
+      - run: npx playwright install --with-deps chromium
+      - name: Browser end-to-end checks
+        run: |
+          php -S 127.0.0.1:8088 -t browser > /tmp/nearby-php.log 2>&1 &
+          PHP_PID=$!
+          trap 'kill "$PHP_PID"' EXIT
+          npm run test:browser
