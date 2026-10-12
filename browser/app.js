@@ -10,6 +10,7 @@ const sizes = n => n < 1024 ? `${n} Б` : n < 1024 ** 2 ? `${(n / 1024).toFixed(
 function notice(text, error = false) { $('notice').textContent = text; $('notice').classList.toggle('error', error); $('notice').hidden = !text; }
 function status(title, detail, connected = false) { $('connection-title').textContent = title; $('connection-detail').textContent = detail; $('status-dot').classList.toggle('connected', connected); }
 const nameStorageKey = 'nearby.device-name';
+const nameVersionKey = 'nearby.device-name.version';
 function cleanDeviceName(value) { return typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 40) : ''; }
 function suggestedDeviceName() {
   const ua = navigator.userAgent || '';
@@ -20,19 +21,25 @@ function suggestedDeviceName() {
     : /Win/i.test(platform + ua) ? 'Windows'
     : /Mac/i.test(platform + ua) ? 'Mac'
     : /Linux/i.test(platform + ua) ? 'Linux' : 'Устройство';
-  const names = ['Луна', 'Клён', 'Маяк', 'Облако', 'Искра', 'Ветер', 'Сосна', 'Комета', 'Ручей', 'Сокол', 'Кедр', 'Луч'];
+  const names = ['Эльбрус', 'Дыхтау', 'Шхара', 'Коштантау', 'Пик Пушкина', 'Джангитау', 'Мижирги', 'Казбек'];
   const random = new Uint32Array(1);
   if (globalThis.crypto?.getRandomValues) crypto.getRandomValues(random);
   else random[0] = Math.floor(Math.random() * 2 ** 32);
   return `${device} · ${names[random[0] % names.length]}`;
 }
 let initialDeviceName = '';
-try { initialDeviceName = cleanDeviceName(localStorage.getItem(nameStorageKey)); } catch { /* Storage may be disabled. */ }
+try {
+  initialDeviceName = cleanDeviceName(localStorage.getItem(nameStorageKey));
+  // The first naming version saved no origin flag. Migrate only its exact default format, once.
+  if (localStorage.getItem(nameVersionKey) !== '2' && /^(?:iPhone|iPad|Android|Windows|Mac|Linux|Устройство) · (?:Луна|Клён|Маяк|Облако|Искра|Ветер|Сосна|Комета|Ручей|Сокол|Кедр|Луч)$/.test(initialDeviceName)) initialDeviceName = '';
+} catch { /* Storage may be disabled. */ }
 initialDeviceName ||= suggestedDeviceName();
 $('device-name').value = initialDeviceName;
 function rememberDeviceName() {
   const name = cleanDeviceName($('device-name').value);
-  try { if (name) localStorage.setItem(nameStorageKey, name); } catch { /* Naming still works without storage. */ }
+  try {
+    if (name) { localStorage.setItem(nameStorageKey, name); localStorage.setItem(nameVersionKey, '2'); }
+  } catch { /* Naming still works without storage. */ }
 }
 function deviceName() {
   $('device-name').value = cleanDeviceName($('device-name').value) || initialDeviceName;
