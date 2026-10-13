@@ -25,7 +25,7 @@ async function accept(id) {
 }
 before(async () => {
   root = await mkdtemp(path.join(tmpdir(), 'nearby-test-'));
-  app = await createApp({ host: '127.0.0.1', port: 0, storage: root, maxSize: 8 * 1024 ** 2,
+  app = await createApp({ host: '127.0.0.1', port: 0, storage: root, maxSize: 8 * 1024 ** 2, statistics: false,
     openReceivedFolder: async folder => { openedFolder = folder; } });
   base = `http://127.0.0.1:${app.port}`;
   for (const name of ['Телефон', 'Другой телефон']) {

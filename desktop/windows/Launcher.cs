@@ -14,8 +14,11 @@ using Microsoft.Web.WebView2.WinForms;
 
 [assembly: System.Reflection.AssemblyTitle("Nearby")]
 [assembly: System.Reflection.AssemblyDescription("Передача файлов по локальной сети")]
-[assembly: System.Reflection.AssemblyVersion("0.2.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("0.2.0.0")]
+[assembly: System.Reflection.AssemblyVersion("0.5.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("0.5.0.0")]
+#if SERVER2016
+[assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.6.2")]
+#endif
 
 internal static class Program
 {
@@ -110,7 +113,7 @@ internal sealed class NearbyWindow : Form
             };
             engine.Start(); engine.BeginErrorReadLine();
             Task<string> line = engine.StandardOutput.ReadLineAsync();
-            if (await Task.WhenAny(line, Task.Delay(15000)) != line) throw new IOException("Превышено время запуска движка передачи.");
+            if (await Task.WhenAny(line, Task.Delay(30000)) != line) throw new IOException("Превышено время запуска движка передачи.");
             string handshake = await line;
             if (String.IsNullOrEmpty(handshake)) throw new IOException("Движок не запустился. " + errors.ToString());
             var details = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(handshake);
@@ -128,7 +131,16 @@ internal sealed class NearbyWindow : Form
                 Uri target;
                 if (!Uri.TryCreate(e.Uri, UriKind.Absolute, out target) || target.GetLeftPart(UriPartial.Authority) != origin) e.Cancel = true;
             };
-            web.CoreWebView2.NewWindowRequested += delegate(object sender, CoreWebView2NewWindowRequestedEventArgs e) { e.Handled = true; };
+            web.CoreWebView2.NewWindowRequested += delegate(object sender, CoreWebView2NewWindowRequestedEventArgs e) {
+                e.Handled = true;
+                Uri target;
+                if (e.IsUserInitiated && Uri.TryCreate(e.Uri, UriKind.Absolute, out target)
+                    && target.Scheme == "https" && target.Host == "nearby.kiacom.ru" && target.Port == 443
+                    && target.UserInfo == "" && target.AbsolutePath == "/web/" && target.Query == "" && target.Fragment == "#mode=internet") {
+                    try { Process.Start(new ProcessStartInfo(target.AbsoluteUri) { UseShellExecute = true }); }
+                    catch (Exception) { MessageBox.Show(this, "Откройте https://nearby.kiacom.ru/web/#mode=internet в браузере.", "Интернет-режим Nearby"); }
+                }
+            };
             web.CoreWebView2.PermissionRequested += delegate(object sender, CoreWebView2PermissionRequestedEventArgs e) { e.State = CoreWebView2PermissionState.Deny; };
             web.CoreWebView2.DownloadStarting += delegate(object sender, CoreWebView2DownloadStartingEventArgs e) {
                 var deferral = e.GetDeferral();

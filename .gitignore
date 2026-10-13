@@ -15,3 +15,5 @@ landing/
 Сохранить-доступ-Sweb.cmd
 *.clixml
 browser/config.private.php
+**/device-identity.json
+**/trusted-devices.json

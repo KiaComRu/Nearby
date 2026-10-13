@@ -35,8 +35,15 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm run build:web
       - run: php -l browser/api.php
+      - run: php -l browser/relay.php
       - run: npm run test:web
       - run: npx playwright install --with-deps chromium
+      - run: npm run test:pc
+      - run: npm run test:trusted
+      - run: npm run test:discovery
+        env:
+          NEARBY_TEST_DISCOVERY_IN_MEMORY: '1'
+      - run: npm run test:internet
       - name: Browser end-to-end checks
         run: |
           php -S 127.0.0.1:8088 -t browser > /tmp/nearby-php.log 2>&1 &

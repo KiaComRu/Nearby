@@ -1,8 +1,8 @@
 {
   "name": "nearby-transfer",
-  "version": "0.2.0",
+  "version": "0.5.0",
   "private": true,
-  "description": "Nearby — передача файлов по локальной сети",
+  "description": "Nearby — передача файлов по локальной сети и через интернет",
   "type": "module",
   "engines": {
     "node": ">=22"
@@ -11,12 +11,19 @@
     "start": "node server.mjs",
     "test": "node --test",
     "build:windows": "powershell -NoProfile -File desktop/windows/build.ps1",
+    "build:server2016": "powershell -NoProfile -ExecutionPolicy Bypass -File desktop/windows/build.ps1 -Target Server2016",
     "build:web": "node browser/build.mjs",
+    "build:icons": "node scripts/generate-favicons.mjs",
     "test:web": "node --test test/browser-*.test.mjs",
-    "test:browser": "node scripts/browser-e2e.mjs"
+    "test:browser": "node scripts/browser-e2e.mjs",
+    "test:internet": "node scripts/internet-e2e.mjs",
+    "test:discovery": "node scripts/discovery-e2e.mjs",
+    "test:trusted": "node scripts/trusted-e2e.mjs",
+    "test:pc": "node scripts/pc-e2e.mjs"
   },
   "dependencies": {
-    "qrcode": "1.5.4"
+    "qrcode": "1.5.4",
+    "selfsigned": "5.5.0"
   },
   "license": "MIT",
   "devDependencies": {

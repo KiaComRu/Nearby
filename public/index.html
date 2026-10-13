@@ -5,22 +5,38 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#111916">
   <title>Nearby — файлы рядом</title>
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48 64x64">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" sizes="any">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180">
   <link rel="stylesheet" href="/styles.css">
   <script src="/app.js" defer></script>
+  <script src="/statistics.js" defer></script>
 </head>
 <body>
   <header><a class="brand" href="/">↗ <span>nearby<span class="dot">.</span></span></a><span class="badge">Локальная передача · прототип</span></header>
   <main>
-    <div class="intro"><div class="eyebrow">ОДНА СЕТЬ. ЛЮБЫЕ ФАЙЛЫ.</div><h1>Ближе устройства.<br><span>Быстрее передача.</span></h1><p>С компьютера на телефон и обратно.<br>Без аккаунтов, облака и подключения к интернету.</p></div>
+    <div class="intro"><div class="eyebrow">ОДНА СЕТЬ. ЛЮБЫЕ ФАЙЛЫ.</div><h1>Ближе устройства.<br><span>Быстрее передача.</span></h1><p>Между двумя компьютерами, компьютером и телефоном.<br>Файлы передаются напрямую по локальной сети.</p></div>
     <p id="message" class="notice" role="status" aria-live="polite" hidden></p>
+    <section class="panel internet-mode"><div class="step">РАЗНЫЕ СЕТИ</div><h2>Подключиться через интернет</h2><p>Для разных Wi-Fi и мобильной сети откройте интернет-режим в браузере. Создайте приглашение и отправьте ссылку на второе устройство. До 100 МиБ на файл, оба устройства должны оставаться онлайн. Зашифрованные части временно проходят через сервер Nearby.</p><a class="internet-link" href="https://nearby.kiacom.ru/web/#mode=internet" target="_blank" rel="noopener">Открыть интернет-режим ↗</a></section>
     <section id="join" class="panel" hidden>
       <div class="step">01 / ПОДКЛЮЧЕНИЕ</div><h2>Давайте познакомим устройства</h2>
       <p>Введите PIN из окна владельца на компьютере.</p>
       <form id="join-form"><label for="device">Имя этого устройства</label><input id="device" maxlength="60" value="Моё устройство" required autocomplete="off"><label for="pin">PIN подключения</label><input id="pin" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="000000" required autocomplete="off"><button type="submit">Подключиться <span>↗</span></button></form>
     </section>
     <div id="workspace" hidden>
+      <div id="pc-mode-switch" class="pc-mode-switch" hidden><button id="pc-show-invite" type="button" aria-pressed="true">Пригласить устройство</button><button id="pc-show-connect" type="button" aria-pressed="false" class="secondary">Подключиться к ПК</button></div>
+      <section id="trusted-panel" class="panel trusted-panel" hidden><div class="step">ПРОВЕРЕННЫЕ ПОДКЛЮЧЕНИЯ</div><h2>Мои устройства</h2><p id="trusted-identity"></p><div id="pairing-requests" aria-live="polite"></div><div id="trusted-devices" class="file-list"></div><p class="subtle">При первом сопряжении сверяйте всю строку проверки на обоих ПК. После двух подтверждений устройство сохраняется, а соединение проверяет его ключ. Приём каждого файла по-прежнему подтверждается отдельно.</p></section>
+      <section id="discovery" class="panel discovery" hidden><div class="discovery-heading"><div><div class="step">В ОБЩЕЙ СЕТИ</div><h2>Устройства рядом</h2></div><button id="discovery-refresh" type="button" class="secondary">Обновить поиск</button></div><p id="discovery-state" role="status">Ищем открытые приложения Nearby…</p><div id="nearby-devices" class="file-list"></div><p id="discovery-name" class="subtle"></p><details><summary>Компьютер не найден?</summary><p>Для защищённого сопряжения откройте Nearby 0.5.0 на обоих ПК. Проверьте общую сеть и разрешение Nearby в брандмауэре частной сети. VPN и изоляция Wi-Fi могут мешать поиску. Можно подключиться по адресу ниже или открыть интернет-режим.</p><p>Поиск показывает устройства, которые объявили себя в сети. Для первого защищённого подключения сверяйте всю строку проверки на обоих экранах.</p></details></section>
+      <section id="pc-connect" class="panel pc-connect" hidden>
+        <div class="step">ПК ↔ ПК</div><h2>Подключиться к другому компьютеру</h2>
+        <p id="pc-connect-hint">Выберите ПК в списке «Устройства рядом» или вставьте его адрес из окна Nearby. Введите PIN с экрана получателя. Оба ПК должны быть в одной доступной локальной сети.</p>
+        <form id="pc-connect-form"><div class="pc-fields"><div><label for="pc-address">Адрес Nearby на другом ПК</label><input id="pc-address" type="text" inputmode="url" placeholder="http://192.168.1.10:53317" required autocomplete="off"></div><div><label for="pc-pin">PIN другого ПК</label><input id="pc-pin" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="000000" required autocomplete="off"></div><div><label for="pc-device">Имя этого ПК</label><input id="pc-device" maxlength="60" value="Второй компьютер" required autocomplete="off"></div></div><button type="submit" id="pc-connect-submit">Подключиться по PIN · HTTP</button></form>
+        <button id="secure-pair" type="button">Защищённое сопряжение по адресу</button><p id="legacy-hint" class="subtle">Подключение по PIN использует прежний HTTP-режим в доверенной сети. Для шифрованной связи двух ПК используйте защищённое сопряжение; нужны Nearby 0.5.0 на обоих устройствах.</p>
+        <div class="pc-diagnostics"><button id="pc-diagnose" type="button" class="secondary">Проверить адрес</button><p id="pc-diagnostic-state" role="status" hidden></p></div>
+        <div id="pc-connected" hidden><p>Подключено к <strong id="pc-peer-address"></strong></p><p id="pc-transport"></p><button id="pc-disconnect" type="button" class="secondary">Вернуться к своему подключению</button></div>
+      </section>
       <section id="connection" class="panel connection" hidden>
-        <div class="connection-info"><div class="step">01 / ПОДКЛЮЧЕНИЕ</div><h2>Пригласите второе устройство</h2><p>Подключите его к той же Wi-Fi сети и отсканируйте QR-код камерой.</p><label for="address">Или откройте этот адрес в браузере</label><select id="address"></select><div class="pin-line">PIN подключения <strong id="shown-pin"></strong></div></div><div class="qr"><img id="qr" alt="QR-код для подключения второго устройства" width="200" height="200"><span>Наведите камеру телефона</span></div>
+        <div class="connection-info"><div class="step">01 / ПОДКЛЮЧЕНИЕ</div><h2>Пригласите второе устройство</h2><p>Для двух ПК используйте защищённое сопряжение в «Устройствах рядом» или «Моих устройствах». На телефоне отсканируйте QR-код и введите PIN в общей доверенной сети.</p><label for="address">Адрес этого компьютера</label><select id="address"></select><label for="share-address">Ссылка для другого устройства</label><div class="share-address-row"><input id="share-address" readonly aria-label="Ссылка приглашения с PIN"><button id="copy-address" type="button" class="secondary">Копировать</button></div><div class="pin-line">PIN подключения <strong id="shown-pin"></strong></div></div><div class="qr"><img id="qr" alt="QR-код для подключения второго устройства" width="200" height="200"><span>Для телефона · HTTP в доверенной сети</span></div>
       </section>
       <div class="columns">
         <section class="panel"><div class="step">02 / ОТПРАВКА</div><h2 id="send-title">Отправить на компьютер</h2><p id="send-description">Выберите файлы. Получатель подтвердит приём на компьютере.</p><label class="drop" id="drop"><span class="upload-icon">↥</span><strong>Выберите файлы</strong><span>или перетащите их сюда</span><input type="file" id="files" multiple></label><div id="queue" class="file-list" aria-live="polite"></div><p class="subtle" id="save-hint"></p></section>
@@ -28,7 +44,13 @@
       </div>
       <section class="panel history"><div class="step">АКТИВНОСТЬ</div><h2>Передачи</h2><div id="history" class="file-list"></div></section>
     </div>
-    <footer><span class="online-dot"></span> Напрямую по вашей сети <span class="footer-separator">/</span> Используйте доверенную Wi-Fi сеть: прототип передаёт данные без шифрования.</footer>
+    <section class="global-statistics" id="transfer-statistics" data-statistics-endpoint="/api/statistics" data-statistics-method="GET" aria-labelledby="stats-heading">
+      <h2 id="stats-heading">Уже передано через Nearby</h2>
+      <div class="statistics-values"><div><strong id="stats-files">—</strong><span>файлов передано</span></div><div><button id="stats-volume" type="button" aria-expanded="false" aria-controls="stats-exact" aria-label="Точное число байтов" disabled>—</button><span>данных · нажмите на объём</span></div></div>
+      <p id="stats-exact" hidden></p><p id="stats-state" role="status">Загружаем общий итог…</p>
+      <p class="statistics-privacy">Для счётчика отправляем размер, время, случайный ID и тип версии. Имена и содержимое файлов не собираются. Без интернета отчёты ожидают отправки до 7 дней.</p>
+    </section>
+    <footer><span class="online-dot"></span> Напрямую по вашей сети <span class="footer-separator">/</span> Защищённое сопряжение ПК использует TLS. Подключение телефона по локальному QR/PIN использует HTTP в доверенной сети.</footer>
   </main>
 </body>
 </html>

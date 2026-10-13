@@ -9,6 +9,10 @@ import { pipeline } from 'node:stream/promises';
 import { Transform } from 'node:stream';
 import { spawn } from 'node:child_process';
 import QRCode from 'qrcode';
+import { createStatisticsReporter } from './transfer-statistics.mjs';
+import { createLanPeer } from './lan-peer.mjs';
+import { createLanDiscovery } from './lan-discovery.mjs';
+import { createTrustedLan } from './trusted-lan.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const token = () => randomBytes(24).toString('hex');
@@ -75,11 +79,19 @@ export async function createApp({
   assetsDirectory = path.join(here, 'public'),
   maxSize = 100 * 1024 ** 3,
   openReceivedFolder = openFolder,
+  statistics = {},
+  discovery = host === '0.0.0.0' && process.env.NEARBY_DISABLE_DISCOVERY !== '1' ? {} : false,
+  trustedLan = host === '0.0.0.0' && process.env.NEARBY_DISABLE_TRUSTED_LAN !== '1' ? {} : false,
 } = {}) {
   const inbox = receivedDirectory ? path.resolve(receivedDirectory) : path.resolve(storage, 'received');
   const outbox = path.join(storage, 'shared');
   await mkdir(inbox, { recursive: true });
   await mkdir(outbox, { recursive: true });
+  const reporter = statistics === false ? null : createStatisticsReporter({ storage, ...statistics });
+  const recordTransfer = async (id, size) => {
+    try { await reporter?.record(id, size); }
+    catch { /* A saved file stays successful if statistics storage is unavailable. */ }
+  };
   const pin = String(randomInt(0, 1_000_000)).padStart(6, '0');
   const adminToken = token();
   const sessions = new Map();
@@ -91,16 +103,27 @@ export async function createApp({
   let closing = false;
   let boundPort;
   const addressScore = value => value.startsWith('192.168.') ? 0 : value.startsWith('10.') ? 1 : 2;
-  const addresses = [...new Set(Object.values(networkInterfaces()).flat()
+  const readAddresses = () => [...new Set(Object.values(networkInterfaces()).flat()
     .filter(x => x && x.family === 'IPv4' && !x.internal).map(x => x.address))]
     .sort((left, right) => addressScore(left) - addressScore(right));
+  let addresses = readAddresses();
   const allowedHosts = new Set(['localhost', '127.0.0.1', ...addresses]);
   if (host !== '0.0.0.0') allowedHosts.add(host);
-  const publicOffer = ({ id, name, size, state, created, received, device, error }) =>
-    ({ id, name, size, state, created, received, device, error });
+  let trustedService;
+  const peer = createLanPeer({ isSelf: url => allowedHosts.has(url.hostname) && Number(url.port || 80) === boundPort, trusted: () => trustedService });
+  const version = JSON.parse(await readFile(path.join(here, 'package.json'), 'utf8')).version;
+  let discoveryService;
+  let diagnosing = false;
+  function updateAddresses() {
+    addresses = readAddresses(); allowedHosts.clear();
+    for (const address of ['localhost', '127.0.0.1', ...addresses, ...(host === '0.0.0.0' ? [] : [host])]) allowedHosts.add(address);
+  }
+  const publicOffer = ({ id, name, size, state, created, received, device, error, secure }) =>
+    ({ id, name, size, state, created, received, device, error, secure });
   const publicShare = ({ id, name, size }) => ({ id, name, size });
 
   function auth(req, adminOnly = false) {
+    if (req.socket.encrypted) { if (adminOnly) throw fail(403, 'Нужен локальный владелец.'); return trustedService.authentication(req); }
     const value = req.headers.authorization?.replace(/^Bearer /u, '');
     const remote = req.socket.remoteAddress;
     if (sameSecret(value, adminToken) &&
@@ -167,23 +190,85 @@ export async function createApp({
   const staticFiles = new Map([
     ['/', ['index.html', 'text/html; charset=utf-8']],
     ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
+    ['/statistics.js', ['statistics.js', 'text/javascript; charset=utf-8']],
     ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
+    ['/favicon.ico', ['favicon.ico', 'image/x-icon']],
+    ['/favicon.svg', ['favicon.svg', 'image/svg+xml']],
+    ['/apple-touch-icon.png', ['apple-touch-icon.png', 'image/png']],
   ]);
-  const server = http.createServer({ requestTimeout: 0, headersTimeout: 15_000 }, async (req, res) => {
+  const handleRequest = async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
     try {
       const url = new URL(req.url, `http://127.0.0.1:${boundPort}`);
+      updateAddresses();
       const authority = new URL(`http://${req.headers.host}`);
-      if (!allowedHosts.has(authority.hostname) || authority.port !== String(boundPort)) {
+      if (!allowedHosts.has(authority.hostname) || authority.port !== String(req.socket.encrypted ? trustedService.securePort : boundPort)) {
         throw fail(403, 'Недопустимый адрес сервера.');
       }
       if (req.headers.origin && req.headers.origin !== authority.origin) {
         throw fail(403, 'Запрос с другого сайта запрещён.');
       }
       prune();
+      if (req.method === 'GET' && url.pathname === '/api/info') {
+        json(res, 200, { product: 'Nearby', protocol: 'nearby-lan/1', version, secure: trustedService?.publicIdentity }); return;
+      }
+      if (url.pathname === '/api/trust' || url.pathname.startsWith('/api/trust/')) {
+        auth(req, true);
+        if (!trustedService) { if (req.method === 'GET') { json(res, 200, { enabled: false, devices: [], requests: [] }); return; } throw fail(409, 'Защищённое сопряжение отключено в этом запуске.'); }
+        if (req.method === 'GET' && url.pathname === '/api/trust') { json(res, 200, { enabled: true, ...trustedService.state }); return; }
+        if (req.method !== 'POST') throw fail(405, 'Используйте POST.');
+        const body = await jsonBody(req);
+        if (url.pathname === '/api/trust/pair') { json(res, 200, await trustedService.pair(body?.address)); return; }
+        if (url.pathname === '/api/trust/confirm') await trustedService.confirm(body?.id);
+        else if (url.pathname === '/api/trust/reject') await trustedService.reject(body?.id);
+        else if (url.pathname === '/api/trust/revoke') await trustedService.revoke(body?.fingerprint);
+        else if (url.pathname === '/api/trust/rename') await trustedService.rename(body?.fingerprint, body?.name);
+        else throw fail(404, 'Адрес не найден.');
+        json(res, 200, { ok: true }); return;
+      }
+      if (url.pathname === '/api/discovery' || url.pathname === '/api/discovery/refresh') {
+        auth(req, true);
+        if (req.method === 'POST' && url.pathname.endsWith('/refresh')) await discoveryService?.refresh();
+        else if (req.method !== 'GET' || url.pathname !== '/api/discovery') throw fail(405, 'Используйте GET для списка устройств.');
+        const found = discoveryService?.state || { status: 'disabled', devices: [], interfaces: [] };
+        json(res, 200, { ...found, secureIdentity: trustedService ? { name: trustedService.identity.name, fingerprint: trustedService.identity.fingerprint } : undefined }); return;
+      }
+      if (url.pathname === '/api/peer/download' && req.method === 'GET') {
+        await peer.download(req, res, url.searchParams.get('ticket')); return;
+      }
+      if (url.pathname.startsWith('/api/peer/')) {
+        auth(req, true);
+        if (req.method === 'POST' && url.pathname === '/api/peer/diagnose') {
+          if (diagnosing) throw fail(429, 'Проверка уже выполняется. Дождитесь результата.');
+          const body = await jsonBody(req); diagnosing = true;
+          try { json(res, 200, await peer.diagnose(body?.address)); } finally { diagnosing = false; }
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/peer/connect') {
+          const remote = await peer.connect(await jsonBody(req));
+          json(res, 200, { ...remote, localAdmin: true, receivedDirectory: inbox }); return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/peer/disconnect') {
+          peer.disconnect(); json(res, 200, { ok: true }); return;
+        }
+        if (req.method === 'GET' && url.pathname === '/api/peer/remote/api/state') {
+          json(res, 200, { ...await peer.state(), localAdmin: true, receivedDirectory: inbox }); return;
+        }
+        if (url.pathname.startsWith('/api/peer/remote/')) {
+          const result = await peer.proxy(req, res, url.pathname.slice('/api/peer/remote'.length));
+          if (result) json(res, 200, result);
+          return;
+        }
+        throw fail(404, 'Адрес не найден.');
+      }
+      if (req.method === 'GET' && url.pathname === '/api/statistics') {
+        const totals = await reporter?.getStats();
+        json(res, totals ? 200 : 503, totals || { error: 'Статистика временно недоступна.' });
+        return;
+      }
       if (req.method === 'GET' && staticFiles.has(url.pathname)) {
         const [name, type] = staticFiles.get(url.pathname);
         res.writeHead(200, { 'Content-Type': type });
@@ -207,6 +292,7 @@ export async function createApp({
         const user = auth(req);
         json(res, 200, {
           admin: user.admin,
+          peerConnection: user.admin ? peer.connection : undefined,
           pin: user.admin ? pin : undefined,
           urls: user.admin ? addresses.map(ip => `http://${ip}:${boundPort}`) : undefined,
           receivedDirectory: user.admin ? inbox : undefined,
@@ -238,7 +324,7 @@ export async function createApp({
           throw fail(429, 'Слишком много запросов. Дождитесь завершения передачи.');
         }
         const spec = fileSpec(await jsonBody(req), maxSize);
-        const offer = { ...spec, id: randomUUID(), owner: user.key, device: user.device,
+        const offer = { ...spec, id: randomUUID(), owner: user.key, device: user.device, secure: !!user.trustedFingerprint,
           state: 'pending', received: 0, created: Date.now(), expires: Date.now() + ttl };
         offers.set(offer.id, offer);
         json(res, 201, publicOffer(offer));
@@ -264,6 +350,7 @@ export async function createApp({
           try {
             offer.path = await receive(req, offer, inbox, bytes => { offer.received = bytes; });
             offer.state = 'completed';
+            await recordTransfer(offer.id, offer.size);
             json(res, 201, publicOffer(offer));
           } catch (error) {
             offer.state = 'failed';
@@ -288,10 +375,10 @@ export async function createApp({
         const share = shares.get(shareRoute[1]);
         if (!share) throw fail(404, 'Файл больше не доступен.');
         if (req.method === 'POST' && shareRoute[2] === 'ticket') {
-          auth(req);
+          const user = auth(req);
           if (tickets.size >= 1000) throw fail(429, 'Слишком много скачиваний. Повторите позже.');
           const key = token();
-          tickets.set(key, { share: share.id, expires: Date.now() + ttl });
+          tickets.set(key, { share: share.id, expires: Date.now() + ttl, countTransfer: !user.admin, trustedFingerprint: user.trustedFingerprint });
           json(res, 200, { url: `/api/shares/${share.id}/download?ticket=${key}` });
           return;
         }
@@ -299,11 +386,13 @@ export async function createApp({
           const key = url.searchParams.get('ticket');
           const ticket = tickets.get(key);
           if (!ticket || ticket.share !== share.id) throw fail(403, 'Ссылка истекла. Нажмите «Скачать» ещё раз.');
+          if (ticket.trustedFingerprint && (!req.socket.encrypted || auth(req).trustedFingerprint !== ticket.trustedFingerprint)) throw fail(403, 'Эта ссылка требует защищённого соединения с сопряжённым устройством.');
           tickets.delete(key);
           const info = await stat(share.path);
           res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': info.size,
             'Content-Disposition': `attachment; filename="download"; filename*=UTF-8''${encodeURIComponent(share.name).replace(/'/gu, '%27')}` });
           await pipeline(createReadStream(share.path), res);
+          if (ticket.countTransfer) await recordTransfer(randomUUID(), info.size);
           return;
         }
         if (req.method === 'DELETE' && !shareRoute[2]) {
@@ -317,22 +406,37 @@ export async function createApp({
       throw fail(404, 'Адрес не найден.');
     } catch (error) {
       if (!res.headersSent && !res.destroyed) json(res, error.status || 500,
-        { error: error.status ? error.message : 'Не удалось выполнить операцию. Проверьте соединение и место на диске.' });
+        { error: error.status ? error.message : 'Не удалось выполнить операцию. Проверьте соединение и место на диске.', ...(error.status && error.code ? { code: error.code } : {}) });
       else if (!res.destroyed) res.destroy();
     }
-  });
+  };
+  const server = http.createServer({ requestTimeout: 0, headersTimeout: 15_000 }, handleRequest);
   server.maxConnections = 100;
   await new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, resolve);
   });
   boundPort = server.address().port;
+  if (trustedLan !== false) {
+    try { trustedService = await createTrustedLan({ storage, host, httpPort: boundPort, version, transferHandler: handleRequest,
+      onRevoke: fingerprint => { if (peer.connection?.fingerprint === fingerprint) peer.disconnect(); }, ...trustedLan }); }
+    catch (error) { await reporter?.close(); await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }); throw error; }
+  }
+  if (discovery !== false) {
+    discoveryService = createLanDiscovery({ port: boundPort, version,
+      ...(trustedService ? { name: trustedService.identity.name, secure: { port: trustedService.securePort, fingerprint: trustedService.identity.fingerprint } } : {}), ...discovery });
+    await discoveryService.ready;
+  }
   return {
     server, pin, adminToken, port: boundPort, inbox,
     urls: addresses.map(ip => `http://${ip}:${boundPort}`),
     adminUrl: `http://127.0.0.1:${boundPort}/#admin=${adminToken}`,
     async close() {
       closing = true;
+      peer.disconnect();
+      await trustedService?.close();
+      await discoveryService?.close();
+      await reporter?.close();
       await new Promise(resolve => {
         server.close(resolve);
         server.closeAllConnections();

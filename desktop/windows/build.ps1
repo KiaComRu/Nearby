@@ -1,7 +1,9 @@
-﻿$ErrorActionPreference = 'Stop'
+﻿param([ValidateSet('Windows', 'Server2016')][string]$Target = 'Windows')
+$ErrorActionPreference = 'Stop'
 $taskRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $taskTools = Join-Path $taskRoot '.build-tools'
-$taskStage = Join-Path $taskRoot 'dist\windows-x64'
+$taskPlatform = if ($Target -eq 'Server2016') { 'windows-server-2016-x64' } else { 'windows-x64' }
+$taskStage = Join-Path $taskRoot "dist\$taskPlatform"
 $taskArtifacts = Join-Path $taskRoot 'artifacts'
 $taskCompiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $taskWebVersion = '1.0.4258.31'
@@ -12,6 +14,7 @@ if (-not (Test-Path -LiteralPath $taskCompiler)) { throw 'Нужен .NET Framew
 $taskNode = (Get-Command node.exe -ErrorAction Stop).Source
 $taskNodeVersion = (& $taskNode --version).Trim()
 if ([int]($taskNodeVersion.TrimStart('v').Split('.')[0]) -lt 22) { throw 'Нужен Node.js 22 или новее.' }
+if ($Target -eq 'Server2016' -and [int]($taskNodeVersion.TrimStart('v').Split('.')[0]) -ne 24) { throw 'Для проверенного профиля Server 2016 нужен Node.js 24 x64.' }
 if (-not [Environment]::Is64BitProcess) { throw 'Запустите сборку из 64-разрядного PowerShell.' }
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 New-Item -ItemType Directory -Force -Path $taskTools,$taskStage,$taskArtifacts | Out-Null
@@ -39,11 +42,35 @@ $taskMakensis = Join-Path $taskNsisRoot 'Bin\makensis.exe'
 if (-not (Test-Path -LiteralPath $taskMakensis)) { throw 'NSIS compiler was not found.' }
 $env:NSISDIR = $taskNsisRoot
 
+# Compile against the actual 4.6.2 API surface, not merely a changed runtime config.
+if ($Target -eq 'Server2016') {
+    $taskReferenceRoot = Join-Path $taskTools 'net462-1.0.3'
+    $taskReferences = Join-Path $taskReferenceRoot 'build\.NETFramework\v4.6.2'
+    if (-not (Test-Path -LiteralPath (Join-Path $taskReferences 'mscorlib.dll'))) {
+        $taskReferenceArchive = Join-Path $taskTools 'net462.zip'
+        Invoke-WebRequest -UseBasicParsing -Uri 'https://api.nuget.org/v3-flatcontainer/microsoft.netframework.referenceassemblies.net462/1.0.3/microsoft.netframework.referenceassemblies.net462.1.0.3.nupkg' -OutFile $taskReferenceArchive
+        [xml]$taskReferenceMetadata = (Invoke-WebRequest -UseBasicParsing -Uri "https://www.nuget.org/api/v2/Packages(Id='Microsoft.NETFramework.ReferenceAssemblies.net462',Version='1.0.3')").Content
+        if ($taskReferenceMetadata.SelectSingleNode("//*[local-name()='PackageHashAlgorithm']").InnerText -ne 'SHA512') { throw 'Unsupported reference assembly checksum algorithm.' }
+        $taskReferenceHasher = [Security.Cryptography.SHA512]::Create()
+        $taskReferenceStream = [IO.File]::OpenRead($taskReferenceArchive)
+        try { $taskReferenceHash = [Convert]::ToBase64String($taskReferenceHasher.ComputeHash($taskReferenceStream)) }
+        finally { $taskReferenceStream.Dispose(); $taskReferenceHasher.Dispose() }
+        if ($taskReferenceHash -ne $taskReferenceMetadata.SelectSingleNode("//*[local-name()='PackageHash']").InnerText) { throw 'Контрольная сумма .NET 4.6.2 reference assemblies не совпала.' }
+        Expand-Archive -LiteralPath $taskReferenceArchive -DestinationPath $taskReferenceRoot -Force
+    }
+}
+
 $taskApp = Join-Path $taskStage 'app'
 $taskRuntime = Join-Path $taskStage 'runtime'
 $taskLicenses = Join-Path $taskStage 'licenses'
 New-Item -ItemType Directory -Force -Path $taskApp,$taskRuntime,$taskLicenses,(Join-Path $taskApp 'desktop\windows') | Out-Null
 Copy-Item -LiteralPath (Join-Path $taskRoot 'server.mjs') -Destination $taskApp
+Copy-Item -LiteralPath (Join-Path $taskRoot 'transfer-statistics.mjs') -Destination $taskApp
+Copy-Item -LiteralPath (Join-Path $taskRoot 'lan-peer.mjs') -Destination $taskApp
+Copy-Item -LiteralPath (Join-Path $taskRoot 'lan-discovery.mjs') -Destination $taskApp
+Copy-Item -LiteralPath (Join-Path $taskRoot 'device-identity.mjs') -Destination $taskApp
+Copy-Item -LiteralPath (Join-Path $taskRoot 'lan-tls.mjs') -Destination $taskApp
+Copy-Item -LiteralPath (Join-Path $taskRoot 'trusted-lan.mjs') -Destination $taskApp
 Copy-Item -LiteralPath (Join-Path $taskRoot 'public') -Destination $taskApp -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $taskRoot 'package.json'),(Join-Path $taskRoot 'package-lock.json') -Destination $taskApp
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'host.mjs') -Destination (Join-Path $taskApp 'desktop\windows')
@@ -56,25 +83,46 @@ foreach ($taskLib in @('Microsoft.Web.WebView2.Core.dll','Microsoft.Web.WebView2
     Copy-Item -LiteralPath (Join-Path $taskWebRoot "lib\net462\$taskLib") -Destination $taskStage -Force
 }
 Copy-Item -LiteralPath (Join-Path $taskWebRoot 'runtimes\win-x64\native\WebView2Loader.dll') -Destination $taskStage -Force
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Nearby.exe.config') -Destination $taskStage -Force
+$taskConfig = if ($Target -eq 'Server2016') { 'Nearby.Server2016.exe.config' } else { 'Nearby.exe.config' }
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot $taskConfig) -Destination (Join-Path $taskStage 'Nearby.exe.config') -Force
 & $taskNode (Join-Path $PSScriptRoot 'make-icon.mjs') (Join-Path $taskStage 'Nearby.ico')
 if ($LASTEXITCODE -ne 0) { throw 'Не удалось подготовить значок.' }
 $taskExe = Join-Path $taskStage 'Nearby.exe'
-& $taskCompiler /nologo /target:winexe /platform:x64 /optimize+ "/out:$taskExe" "/win32icon:$(Join-Path $taskStage 'Nearby.ico')" /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Web.Extensions.dll "/reference:$(Join-Path $taskStage 'Microsoft.Web.WebView2.Core.dll')" "/reference:$(Join-Path $taskStage 'Microsoft.Web.WebView2.WinForms.dll')" (Join-Path $PSScriptRoot 'Launcher.cs')
+$taskCompilerArgs = @('/nologo', '/target:winexe', '/platform:x64', '/optimize+', "/out:$taskExe", "/win32icon:$(Join-Path $taskStage 'Nearby.ico')")
+if ($Target -eq 'Server2016') {
+    $taskCompilerArgs += @('/noconfig', '/nostdlib+', '/define:SERVER2016')
+    foreach ($taskReference in @('mscorlib.dll', 'System.dll', 'System.Core.dll', 'System.Drawing.dll', 'System.Windows.Forms.dll', 'System.Web.Extensions.dll')) {
+        $taskCompilerArgs += "/reference:$(Join-Path $taskReferences $taskReference)"
+    }
+} else {
+    $taskCompilerArgs += @('/reference:System.dll', '/reference:System.Core.dll', '/reference:System.Drawing.dll', '/reference:System.Windows.Forms.dll', '/reference:System.Web.Extensions.dll')
+}
+$taskCompilerArgs += @("/reference:$(Join-Path $taskStage 'Microsoft.Web.WebView2.Core.dll')", "/reference:$(Join-Path $taskStage 'Microsoft.Web.WebView2.WinForms.dll')", (Join-Path $PSScriptRoot 'Launcher.cs'))
+& $taskCompiler @taskCompilerArgs
 if ($LASTEXITCODE -ne 0) { throw 'Ошибка компиляции Windows-приложения.' }
-$taskSetup = Join-Path $taskArtifacts 'Nearby-0.2.0-windows-x64-setup.exe'
-& $taskMakensis /V2 "/DPAYLOAD=$taskStage" "/DOUTPUT=$taskSetup" (Join-Path $PSScriptRoot 'installer.nsi')
+$taskSetup = Join-Path $taskArtifacts "Nearby-0.5.0-$taskPlatform-setup.exe"
+$taskInstallerArgs = @('/V2', "/DPAYLOAD=$taskStage", "/DOUTPUT=$taskSetup")
+if ($Target -eq 'Server2016') { $taskInstallerArgs += '/DSERVER2016' }
+$taskInstallerArgs += (Join-Path $PSScriptRoot 'installer.nsi')
+& $taskMakensis @taskInstallerArgs
 if ($LASTEXITCODE -ne 0) { throw 'Ошибка сборки установщика.' }
 $taskSetupHasher = [Security.Cryptography.SHA256]::Create()
 $taskSetupStream = [IO.File]::OpenRead($taskSetup)
 try { $taskSetupHash = [BitConverter]::ToString($taskSetupHasher.ComputeHash($taskSetupStream)).Replace('-','').ToLowerInvariant() }
 finally { $taskSetupStream.Dispose(); $taskSetupHasher.Dispose() }
 $taskManifest = [ordered]@{
-    product = 'Nearby'; version = '0.2.0'; platform = 'windows-x64'; node = $taskNodeVersion
+    product = 'Nearby'; version = '0.5.0'; platform = $taskPlatform; node = $taskNodeVersion
     webView2Sdk = $taskWebVersion; builtAt = [DateTime]::UtcNow.ToString('o')
     installer = [IO.Path]::GetFileName($taskSetup)
     sha256 = $taskSetupHash
     signed = $false
 }
-$taskManifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskArtifacts 'windows-build.json') -Encoding UTF8
+$taskManifestName = 'windows-build.json'
+if ($Target -eq 'Server2016') {
+    $taskManifestName = 'windows-server-2016-build.json'
+    $taskManifest['minimumOS'] = 'Windows Server 2016 x64, build 14393, Desktop Experience'
+    $taskManifest['dotNetFramework'] = '4.6.2'
+    $taskManifest['physicalServerVerified'] = $false
+}
+$taskManifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskArtifacts $taskManifestName) -Encoding UTF8
 Write-Output "Готово: $taskSetup"

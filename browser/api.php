@@ -2,7 +2,9 @@
 declare(strict_types=1);
 umask(0077);
 ini_set('display_errors', '0');
-// Short HTTPS requests only. Files never pass through this signaling API.
+require_once __DIR__ . '/statistics.php';
+require_once __DIR__ . '/relay.php';
+// LAN signaling or bounded, opaque encrypted frames in the explicit internet mode.
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 header('X-Content-Type-Options: nosniff');
@@ -36,41 +38,61 @@ try {
         if ($originHost !== $host || !in_array($origin['scheme'] ?? '', ['http', 'https'], true)) fail(403, 'Другой источник запроса.');
     }
     if (strtolower(trim(explode(';', $_SERVER['CONTENT_TYPE'] ?? '')[0])) !== 'application/json') fail(415, 'Нужен JSON.');
-    if ((int)($_SERVER['CONTENT_LENGTH'] ?? 0) > 49152) fail(413, 'Слишком большой запрос.');
-    $raw = file_get_contents('php://input', false, null, 0, 49153);
-    if (strlen($raw) > 49152) fail(413, 'Слишком большой запрос.');
+    $bodyLimit = ($_GET['transport'] ?? '') === 'relay' ? 786432 : 49152;
+    if ((int)($_SERVER['CONTENT_LENGTH'] ?? 0) > $bodyLimit) fail(413, 'Слишком большой запрос.');
+    $raw = file_get_contents('php://input', false, null, 0, $bodyLimit + 1);
+    if (strlen($raw) > $bodyLimit) fail(413, 'Слишком большой запрос.');
     try { $input = json_decode($raw, true, 16, JSON_THROW_ON_ERROR); }
     catch (JsonException $e) { fail(400, 'Некорректный JSON.'); }
     if (!is_array($input)) fail(400, 'Некорректный запрос.');
     $action = $input['action'] ?? '';
+    $relayRequest = in_array($action, ['relay-push', 'relay-pull'], true);
+    if (!$relayRequest && strlen($raw) > 49152) fail(413, 'Слишком большой запрос.');
     $now = time();
     $config = is_file(__DIR__ . '/config.private.php') ? require __DIR__ . '/config.private.php' : [];
     $base = getenv('NEARBY_WEB_STATE_DIR') ?: ($config['stateDirectory'] ?? sys_get_temp_dir() . '/nearby-web-' . substr(hash('sha256', __DIR__), 0, 16));
     if (!is_dir($base) && !mkdir($base, 0700, true) && !is_dir($base)) throw new RuntimeException('State directory unavailable');
     $base = realpath($base);
     if (!$base || str_starts_with($base . '/', realpath(__DIR__) . '/')) throw new RuntimeException('Unsafe state path');
+    relayCleanup($base, $now);
 
     // Per-address budget and bounded state, with lock shared by PHP workers.
     $budgetKey = hash('sha256', $_SERVER['REMOTE_ADDR'] ?? 'unknown');
     $budget = fopen($base . '/budget-' . $budgetKey . '.json', 'c+');
     if (!$budget || !flock($budget, LOCK_EX)) throw new RuntimeException('Rate limit lock failed');
-    $rate = json_decode(stream_get_contents($budget), true) ?: ['window' => $now, 'requests' => 0, 'creates' => 0];
-    if ($now - $rate['window'] >= 60) $rate = ['window' => $now, 'requests' => 0, 'creates' => 0];
-    $rate['requests']++;
-    if ($action === 'create') $rate['creates']++;
+    $rate = json_decode(stream_get_contents($budget), true) ?: ['window' => $now, 'requests' => 0, 'creates' => 0, 'relay' => 0];
+    if ($now - $rate['window'] >= 60) $rate = ['window' => $now, 'requests' => 0, 'creates' => 0, 'relay' => 0];
+    if ($relayRequest) $rate['relay'] = ($rate['relay'] ?? 0) + 1; else $rate['requests']++;
+    if (in_array($action, ['create', 'local-session'], true)) $rate['creates']++;
     writeState($budget, $rate); flock($budget, LOCK_UN); fclose($budget);
-    if ($rate['requests'] > 240 || $rate['creates'] > 10) fail(429, 'Слишком много запросов. Подождите минуту.');
+    if ($rate['requests'] > 240 || $rate['creates'] > 10 || ($rate['relay'] ?? 0) > 1800) fail(429, 'Слишком много запросов. Подождите минуту.');
+
+    if ($action === 'stats') reply(200, transferStatistics($base));
+    if ($action === 'local-session') reply(201, ['token' => localStatisticsToken($base)]);
+    if ($action === 'record-local-transfer') {
+        if (!verifyLocalStatisticsToken($base, $input['token'] ?? null)) fail(403, 'Недействительный ключ статистики.');
+        $id = $input['id'] ?? null; $size = $input['size'] ?? null; $completedAt = $input['completedAt'] ?? null;
+        if (!is_string($id) || !preg_match('/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/D', $id) ||
+            !is_int($size) || $size < 0 || $size > 100 * 1024 ** 3 || !is_int($completedAt) ||
+            !in_array($input['source'] ?? null, ['windows', 'local'], true)) fail(400, 'Некорректная передача.');
+        if ($completedAt < $now - 7 * 86400 || $completedAt > $now + 60) fail(410, 'Срок отчёта истёк или время устройства некорректно.');
+        $day = intdiv($completedAt, 86400);
+        reply(200, transferStatistics($base, ['room' => 'local-' . $day, 'id' => $id, 'size' => $size,
+            'expires' => ($day + 8) * 86400 + 60, 'limit' => 50000]));
+    }
 
     if ($action === 'create') {
+        $mode = $input['mode'] ?? 'lan';
+        if (!in_array($mode, ['lan', 'internet'], true)) fail(400, 'Некорректный режим соединения.');
         $global = fopen($base . '/create.lock', 'c+');
         if (!$global || !flock($global, LOCK_EX)) throw new RuntimeException('Creation lock failed');
-        $active = 0;
+        $active = 0; $internetActive = 0;
         foreach (glob($base . '/room-*.json') ?: [] as $path) {
             $f = fopen($path, 'r+');
             if (!$f) continue;
             if (flock($f, LOCK_EX | LOCK_NB)) {
                 $old = json_decode(stream_get_contents($f), true);
-                if (!$old || ($old['expires'] ?? 0) < $now) unlink($path); else $active++;
+                if (!$old || ($old['expires'] ?? 0) < $now || ($old['closed'] ?? false)) unlink($path); else { $active++; if (($old['mode'] ?? 'lan') === 'internet') $internetActive++; }
                 flock($f, LOCK_UN);
             } else $active++;
             fclose($f);
@@ -79,15 +101,20 @@ try {
             if (filemtime($path) < $now - 3600) @unlink($path);
         }
         if ($active >= 200) { flock($global, LOCK_UN); fclose($global); fail(503, 'Сервис занят. Попробуйте позже.'); }
+        if ($mode === 'internet' && $internetActive >= 20) fail(503, 'Интернет-режим сейчас занят. Попробуйте позже.');
         $room = hexToken(16); $host = hexToken(); $invite = hexToken();
         $state = ['host' => hash('sha256', $host), 'invite' => hash('sha256', $invite), 'guest' => null,
             'hostName' => nameValue($input['name'] ?? ''), 'guestName' => null, 'approved' => false,
-            'expires' => $now + 900, 'created' => $now, 'seq' => 0, 'messages' => [], 'closed' => false];
+            'expires' => $now + ($mode === 'internet' ? 7200 : 900), 'created' => $now, 'seq' => 0, 'messages' => [], 'closed' => false, 'mode' => $mode];
+        if ($mode === 'internet') {
+            $empty = ['seq' => 0, 'ack' => 0, 'frames' => [], 'recent' => []];
+            $state['relay'] = ['host' => $empty, 'guest' => $empty]; $state['relayLast'] = ['host' => $now, 'guest' => $now];
+        }
         $f = fopen($base . '/room-' . $room . '.json', 'x+');
         if (!$f) throw new RuntimeException('Room creation failed');
         chmod($base . '/room-' . $room . '.json', 0600); writeState($f, $state); fclose($f);
         flock($global, LOCK_UN); fclose($global);
-        reply(201, ['room' => $room, 'token' => $host, 'invite' => $invite, 'expires' => $state['expires']]);
+        reply(201, ['room' => $room, 'token' => $host, 'invite' => $invite, 'expires' => $state['expires'], 'mode' => $mode]);
     }
     $room = $input['room'] ?? '';
     if (!is_string($room) || !preg_match('/^[a-f0-9]{32}$/D', $room)) fail(400, 'Некорректная комната.');
@@ -106,15 +133,31 @@ try {
         $guest = hexToken(); $state['guest'] = hash('sha256', $guest);
         $state['guestName'] = nameValue($input['name'] ?? '');
         writeState($f, $state); flock($f, LOCK_UN); fclose($f);
-        reply(200, ['token' => $guest, 'hostName' => $state['hostName'], 'expires' => $state['expires']]);
+        reply(200, ['token' => $guest, 'hostName' => $state['hostName'], 'expires' => $state['expires'], 'mode' => $state['mode'] ?? 'lan']);
     }
     $role = hash_equals($state['host'], $digest) ? 'host' : (($state['guest'] && hash_equals($state['guest'], $digest)) ? 'guest' : null);
     if (!$role) fail(403, 'Недействительный ключ.');
+    if ($relayRequest) {
+        $result = relayAction($action, $input, $state, $role, $base, $now, $config['relayDailyBytes'] ?? 5 * 1024 ** 3);
+        writeState($f, $state); flock($f, LOCK_UN); fclose($f); reply(200, $result);
+    }
+    if ($action === 'record-transfer') {
+        if (!$state['approved']) fail(403, 'Сначала подтвердите устройство.');
+        $id = $input['id'] ?? null; $size = $input['size'] ?? null;
+        if (!is_string($id) || !preg_match('/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/D', $id) ||
+            !is_int($size) || $size < 0 || $size > 10 * 1024 ** 3) fail(400, 'Некорректная передача.');
+        $report = ['room' => $room, 'id' => $id, 'size' => $size, 'expires' => $state['expires']];
+        $result = transferStatistics($base, $report);
+        flock($f, LOCK_UN); fclose($f);
+        reply(200, $result);
+    }
     if ($action === 'approve') {
         if ($role !== 'host' || !$state['guest']) fail(403, 'Подтверждение недоступно.');
         $state['approved'] = true;
+        if (($state['mode'] ?? 'lan') === 'internet') $state['relayLast'] = ['host' => $now, 'guest' => $now];
     } elseif ($action === 'close') {
         $state['closed'] = true; $state['messages'] = [];
+        unset($state['relay']);
     } elseif ($action === 'signal') {
         if (!$state['approved']) fail(403, 'Сначала подтвердите устройство.');
         $message = $input['message'] ?? null;
@@ -131,7 +174,7 @@ try {
     $after = $input['after'] ?? 0;
     if (!is_int($after) || $after < 0) fail(400, 'Некорректный курсор.');
     $messages = array_values(array_filter($state['messages'], fn($m) => $m['from'] !== $role && $m['id'] > $after));
-    // Absolute lifetime; no infinite rooms and no uploaded user files.
+    // Absolute lifetime; internet mode has a bounded, temporary ciphertext queue.
     writeState($f, $state); flock($f, LOCK_UN); fclose($f);
     reply(200, ['approved' => $state['approved'], 'guestName' => $state['guestName'], 'hostName' => $state['hostName'], 'messages' => $messages, 'cursor' => $state['seq'], 'expires' => $state['expires']]);
 } catch (Throwable $e) {

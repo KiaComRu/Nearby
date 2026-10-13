@@ -5,16 +5,20 @@
   <meta name="theme-color" content="#080d18"><meta name="referrer" content="no-referrer">
   <meta name="description" content="Nearby в браузере: передавайте файлы между компьютером и телефоном без установки. Подключение по QR-коду и подтверждение приёма.">
   <title>Nearby — передача в браузере</title>
+  <link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48 64x64">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" sizes="any">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" sizes="180x180">
   <link rel="stylesheet" href="styles.css">
-  <script defer src="vendor/qrcode.js"></script><script type="module" src="app.js?v=mobile-save-1"></script>
+  <script defer src="vendor/qrcode.js"></script><script type="module" src="app.js?v=internet-1"></script><script defer src="statistics.js?v=internet-1"></script>
 </head>
 <body>
   <header class="header"><a class="brand" href="/" aria-label="Nearby — главная"><span class="mark">∿</span>nearby<span class="dot">.</span></a><span class="badge">БРАУЗЕРНАЯ ВЕРСИЯ · БЕТА</span><a class="source" href="https://github.com/KiaComRu/Nearby" target="_blank" rel="noopener noreferrer">GitHub ↗</a></header>
   <main>
-    <section class="intro"><p class="eyebrow">ВАШИ УСТРОЙСТВА. ПРЯМОЕ СОЕДИНЕНИЕ.</p><h1>Передавайте файлы.<br><em>Без установки.</em></h1><p class="lead">Откройте Nearby на двух устройствах в одной локальной сети.<br>Подключитесь по QR-коду и выберите, чем поделиться.</p></section>
+    <section class="intro"><p class="eyebrow">ВАШИ УСТРОЙСТВА. РАССТОЯНИЕ НЕ МЕШАЕТ.</p><h1>Передавайте файлы.<br><em>Между сетями.</em></h1><p class="lead">В одной сети — напрямую. В разных сетях — через интернет. <br>Подключитесь по QR-коду или полной ссылке-приглашению.</p></section>
     <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
     <section id="start" class="panel start-panel">
-      <div><span class="step">01 / НАЧНИТЕ ЗДЕСЬ</span><h2>Свяжите два устройства</h2><p class="muted">Приглашение действует 15 минут. Передача начнётся только после подтверждения.</p></div>
+      <div><span class="step">01 / НАЧНИТЕ ЗДЕСЬ</span><h2>Свяжите два устройства</h2><p class="muted">Подключение и каждый входящий файл подтверждаются получателем.</p></div>
+      <label class="label" for="connection-mode">Как соединить устройства</label><select id="connection-mode"><option value="lan">В одной локальной сети — напрямую</option><option value="internet">Через интернет — любые доступные сети</option></select><p id="mode-help" class="muted"></p>
       <label class="label" for="device-name">Имя устройства — можно изменить</label><input id="device-name" maxlength="40" autocomplete="off" placeholder="Название устройства">
       <button id="create" class="button primary">Создать подключение <span>↗</span></button>
       <div class="divider">УЖЕ ЕСТЬ ПРИГЛАШЕНИЕ?</div>
@@ -33,6 +37,12 @@
         <p id="save-hint" class="muted save-hint"></p><div id="transfers" class="transfers" aria-live="polite"><div id="empty" class="empty">Здесь появятся входящие и исходящие файлы.</div></div>
       </section>
     </section>
-    <section class="notes"><article><span>↔</span><h3>Напрямую</h3><p>Файлы передаются по зашифрованному WebRTC-соединению. Хостинг помогает установить связь и не хранит ваши файлы.</p></article><article><span>◎</span><h3>Под вашим контролем</h3><p>Вы подтверждаете второе устройство и каждый входящий файл. Для подключения к сайту нужен интернет.</p></article><article><span>◷</span><h3>Держите вкладки открытыми</h3><p>Не блокируйте телефон во время передачи. Гостевая Wi-Fi-сеть или VPN могут мешать прямому соединению.</p></article></section>
+    <section class="global-statistics" id="transfer-statistics" data-statistics-endpoint="api.php" aria-labelledby="stats-heading">
+      <h2 id="stats-heading">Уже передано через Nearby</h2>
+      <div class="statistics-values"><div><strong id="stats-files">—</strong><span>файлов передано</span></div><div><button id="stats-volume" type="button" aria-expanded="false" aria-controls="stats-exact" aria-label="Точное число байтов" disabled>—</button><span>данных · нажмите на объём</span></div></div>
+      <p id="stats-exact" hidden></p><p id="stats-state" role="status">Загружаем общий итог…</p>
+      <p class="statistics-privacy">Общий итог браузерной версии и приложения Windows. Содержимое и имена файлов в статистику не входят.</p>
+    </section>
+    <section class="notes"><article><span>↔</span><h3>Два способа передачи</h3><p>В одной сети файлы идут напрямую через WebRTC. В интернет-режиме сервер временно буферизует зашифрованные части. Содержимое и имена шифруются на устройствах; ключ находится только в ссылке-приглашении.</p></article><article><span>◎</span><h3>Под вашим контролем</h3><p>Вы подтверждаете второе устройство и каждый входящий файл. Для подключения к сайту нужен интернет. Для общего счётчика отправляем размер и ID завершённой передачи.</p></article><article><span>◷</span><h3>Держите вкладки открытыми</h3><p>Не блокируйте телефон во время передачи. Если устройства в разных сетях или прямое соединение недоступно, выберите «Через интернет».</p></article></section>
   </main><footer>Nearby Web · Dev.KiaCom <a href="https://github.com/KiaComRu/Nearby/blob/main/docs/BROWSER-MODE.md" target="_blank" rel="noopener noreferrer">Как это работает ↗</a><a href="/">Скачать Windows-приложение ↗</a></footer>
 </body></html>

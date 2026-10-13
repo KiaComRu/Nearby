@@ -8,14 +8,28 @@ for (let i = 0; i < 50; i++) {
   if (i === 49) throw new Error('Browser preview server did not become ready.');
   await new Promise(resolve => setTimeout(resolve, 100));
 }
+const statisticsUrl = new URL('api.php', target);
+async function readStatistics() {
+  const response = await fetch(statisticsUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'stats' }) });
+  assert.equal(response.status, 200);
+  return response.json();
+}
+const baseline = await readStatistics();
 const browser = await chromium.launch({ headless: true });
 const errors = [];
 const contexts = await Promise.all([browser.newContext({ acceptDownloads: true }), browser.newContext({ acceptDownloads: true, viewport: { width: 390, height: 844 }, userAgent: 'Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36' })]);
 const pages = await Promise.all(contexts.map(c => c.newPage()));
-for (const page of pages) {
-  page.on('pageerror', e => errors.push(e.message));
-}
+for (const page of pages) page.on('pageerror', e => errors.push(e.message));
 const [host, guest] = pages;
+let completedFiles = 0, completedBytes = 0;
+async function verifyStatistics() {
+  for (let i = 0; i < 100; i++) {
+    const stats = await readStatistics();
+    if (stats.files === baseline.files + completedFiles && stats.bytes === baseline.bytes + completedBytes) return;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  assert.fail(`Statistics differ from ${completedFiles} completed files / ${completedBytes} bytes: ${JSON.stringify(await readStatistics())}`);
+}
 // Android can expose a picker whose handle cannot be written. Never invoke it there.
 await host.addInitScript(() => { window.showSaveFilePicker = undefined; });
 await guest.addInitScript(() => { window.pickerCalls = 0; window.showSaveFilePicker = async () => { window.pickerCalls++; return { createWritable: async () => { throw new DOMException('Platform denied writing', 'NotAllowedError'); } }; }; });
@@ -31,6 +45,8 @@ async function transfer(from, to, name, bytes) {
   assert.equal(createHash('sha256').update(downloaded).digest('hex'), createHash('sha256').update(bytes).digest('hex'));
   assert.equal(download.suggestedFilename(), name);
   console.log(`Verified ${name}: ${bytes.length} bytes, SHA-256 match`);
+  completedFiles++; completedBytes += bytes.length;
+  await verifyStatistics();
   await card.getByRole('button', { name: 'Убрать из памяти' }).click();
 }
 try {
@@ -59,6 +75,7 @@ try {
   await host.locator('#files').setInputFiles({ name: 'declined.txt', mimeType: 'text/plain', buffer: Buffer.from('decline me') });
   await guest.locator('.transfer').filter({ hasText: 'declined.txt' }).getByRole('button', { name: 'Отклонить' }).click();
   await host.getByText('Передача отклонена или отменена другим устройством.', { exact: true }).first().waitFor();
+  await verifyStatistics();
   assert.equal(await guest.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'mobile has no horizontal overflow');
   await mkdir('artifacts', { recursive: true });
   await host.screenshot({ path: 'artifacts/nearby-web-desktop.png', fullPage: true }); await guest.screenshot({ path: 'artifacts/nearby-web-mobile.png', fullPage: true });
@@ -78,6 +95,8 @@ try {
   await diskPage.getByText('Сохранён в выбранный файл.', { exact: true }).waitFor({ timeout: 60000 });
   const diskHash = await diskPage.evaluate(async () => { const directory = await navigator.storage.getDirectory(); const handle = await directory.getFileHandle('stream-test.bin'); const file = await handle.getFile(); return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer())), n => n.toString(16).padStart(2, '0')).join(''); });
   assert.equal(diskHash, createHash('sha256').update(diskBytes).digest('hex')); console.log('Verified browser disk stream: 2 MiB, SHA-256 match');
+  completedFiles++; completedBytes += diskBytes.length;
+  await verifyStatistics();
   // Reproduce createWritable() denial from the Android report in a picker-enabled context.
   await diskPage.evaluate(() => { window.showSaveFilePicker = async () => ({ createWritable: async () => { throw new DOMException('The request is not allowed by the platform', 'NotAllowedError'); } }); });
   await transfer(host, diskPage, 'denied-write.jpeg', randomBytes(110 * 1024));
@@ -106,6 +125,8 @@ try {
   await transfer(host, diskPage, 'after-fallback-refusal.bin', randomBytes(16391));
   console.log('Verified picker/write denial fallback, download hashes, cancellation, 100 MiB bound and next transfer');
   await diskPage.locator('#disconnect').click();
+  await verifyStatistics();
+  console.log(`Statistics verified: ${completedFiles} completed files, ${completedBytes} bytes; declined and cancelled files excluded.`);
   assert.deepEqual(errors, []); console.log('Browser E2E passed: pairing, both directions, binary hash, empty file, refusal, disconnect, mobile layout.');
 } catch (error) {
   console.error('Browser errors:', errors);

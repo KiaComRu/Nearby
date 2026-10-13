@@ -20,6 +20,8 @@ async function digest(data) {
 export class FileLink {
   constructor(channel, { maxReceive = MEMORY_LIMIT, onOffer, onProgress, onComplete, onError, onReady } = {}) {
     this.channel = channel; this.maxReceive = maxReceive;
+    this.maxChunkSize = channel.maxChunkSize === 262144 ? 262144 : CHUNK_SIZE;
+    this.chunkSize = CHUNK_SIZE;
     this.callbacks = { onOffer, onProgress, onComplete, onError, onReady };
     this.pending = new Map(); this.incoming = null; this.outgoing = null; this.closed = false;
     this.peerLimit = null; this.chain = Promise.resolve();
@@ -30,7 +32,7 @@ export class FileLink {
     });
     channel.addEventListener('close', () => this.close('Соединение закрыто.'));
     channel.addEventListener('error', () => this.close('Ошибка передачи данных.'));
-    this.send({ type: 'hello', version: 1, maxReceive });
+    this.send({ type: 'hello', version: 1, maxReceive, maxChunkSize: this.maxChunkSize });
   }
   emit(name, ...args) { this.callbacks[name]?.(...args); }
   send(message) {
@@ -65,9 +67,9 @@ export class FileLink {
       this.send({ type: 'offer', ...spec });
       await accepted;
       this.emit('onProgress', id, 0, 'sending');
-      for (let offset = 0; offset < file.size; offset += CHUNK_SIZE) {
+      for (let offset = 0; offset < file.size; offset += this.chunkSize) {
         if (outgoing.cancelled || this.closed) throw new Error('Передача отменена.');
-        const data = await file.slice(offset, offset + CHUNK_SIZE).arrayBuffer();
+        const data = await file.slice(offset, offset + this.chunkSize).arrayBuffer();
         const hash = await digest(data);
         if (outgoing.cancelled || this.closed) throw new Error('Передача отменена.');
         const acknowledged = this.wait(id, 'ack');
@@ -135,6 +137,8 @@ export class FileLink {
     if (!message || typeof message !== 'object') throw new Error('Некорректное сообщение.');
     if (message.type === 'hello') {
       if (this.peerLimit !== null || message.version !== 1 || ![MEMORY_LIMIT, DISK_LIMIT].includes(message.maxReceive)) throw new Error('Несовместимая версия Nearby.');
+      if (message.maxChunkSize !== undefined && ![CHUNK_SIZE, 262144].includes(message.maxChunkSize)) throw new Error('Несовместимый размер частей Nearby.');
+      this.chunkSize = Math.min(this.maxChunkSize, message.maxChunkSize || CHUNK_SIZE);
       this.peerLimit = message.maxReceive; this.emit('onReady', this.peerLimit); return;
     }
     if (!idValid(message.id)) throw new Error('Некорректный идентификатор файла.');
@@ -155,7 +159,7 @@ export class FileLink {
     const current = this.incoming;
     if (!current?.accepted || current.id !== message.id) throw new Error('Файл не был принят.');
     if (message.type === 'chunk') {
-      if (current.chunk || message.offset !== current.received || !Number.isInteger(message.size) || message.size < 1 || message.size > CHUNK_SIZE || current.received + message.size > current.size || !/^[a-f0-9]{64}$/.test(message.hash)) throw new Error('Повреждённая последовательность частей файла.');
+      if (current.chunk || message.offset !== current.received || !Number.isInteger(message.size) || message.size < 1 || message.size > this.chunkSize || current.received + message.size > current.size || !/^[a-f0-9]{64}$/.test(message.hash)) throw new Error('Повреждённая последовательность частей файла.');
       current.chunk = message; this.touch(current); return;
     }
     if (message.type === 'finish') {

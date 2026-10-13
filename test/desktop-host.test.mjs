@@ -15,7 +15,7 @@ test('packaged host uses separate user folders and exits when its launcher close
   const received = path.join(root, 'Загрузки', 'Nearby');
   const data = path.join(root, 'Данные');
   const child = spawn(process.execPath, [path.join(project, 'desktop/windows/host.mjs')], {
-    env: { ...process.env, NEARBY_DATA_DIR: data, NEARBY_RECEIVE_DIR: received },
+    env: { ...process.env, NEARBY_DATA_DIR: data, NEARBY_RECEIVE_DIR: received, NEARBY_DISABLE_STATISTICS: '1', NEARBY_DISABLE_DISCOVERY: '1', NEARBY_DISABLE_TRUSTED_LAN: '1' },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   const exited = once(child, 'exit');
@@ -68,7 +68,10 @@ test('Windows distribution contains program files without prototype storage', as
   let entries;
   try { entries = await readdir(staged); }
   catch (error) { if (error.code === 'ENOENT') { t.skip('Build Windows payload first.'); return; } throw error; }
-  assert.deepEqual(entries.sort(), ['desktop', 'node_modules', 'package-lock.json', 'package.json', 'public', 'server.mjs']);
+  assert.deepEqual(entries.sort(), ['desktop', 'device-identity.mjs', 'lan-discovery.mjs', 'lan-peer.mjs', 'lan-tls.mjs', 'node_modules', 'package-lock.json', 'package.json', 'public', 'server.mjs', 'transfer-statistics.mjs', 'trusted-lan.mjs']);
   assert.deepEqual(await readdir(path.join(staged, 'desktop/windows')), ['host.mjs']);
-  assert.deepEqual((await readdir(path.join(staged, 'public'))).sort(), ['app.js', 'index.html', 'styles.css']);
+  assert.deepEqual((await readdir(path.join(staged, 'public'))).sort(), ['app.js', 'apple-touch-icon.png', 'favicon.ico', 'favicon.svg', 'index.html', 'statistics.js', 'styles.css']);
+  for (const file of ['server.mjs', 'device-identity.mjs', 'lan-discovery.mjs', 'lan-peer.mjs', 'lan-tls.mjs', 'trusted-lan.mjs', 'transfer-statistics.mjs', 'desktop/windows/host.mjs', 'public/app.js', 'public/index.html', 'public/styles.css']) {
+    assert.deepEqual(await readFile(path.join(staged, file)), await readFile(path.join(project, file)), `Staged ${file} must match current source`);
+  }
 });
