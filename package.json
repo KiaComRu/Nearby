@@ -13,6 +13,8 @@
     "build:windows": "powershell -NoProfile -File desktop/windows/build.ps1",
     "build:server2016": "powershell -NoProfile -ExecutionPolicy Bypass -File desktop/windows/build.ps1 -Target Server2016",
     "build:web": "node browser/build.mjs",
+    "build:pwa-icons": "node scripts/generate-pwa-icons.mjs",
+    "test:pwa": "node scripts/pwa-e2e.mjs",
     "build:icons": "node scripts/generate-favicons.mjs",
     "test:web": "node --test test/browser-*.test.mjs",
     "test:browser": "node scripts/browser-e2e.mjs",

@@ -38,6 +38,7 @@ jobs:
       - run: php -l browser/relay.php
       - run: npm run test:web
       - run: npx playwright install --with-deps chromium
+      - run: npm run test:pwa
       - run: npm run test:pc
       - run: npm run test:trusted
       - run: npm run test:discovery

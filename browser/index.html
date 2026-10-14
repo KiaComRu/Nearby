@@ -5,6 +5,12 @@
   <meta name="theme-color" content="#080d18"><meta name="referrer" content="no-referrer">
   <meta name="description" content="Nearby в браузере: передавайте файлы между компьютером и телефоном без установки. Подключение по QR-коду и подтверждение приёма.">
   <title>Nearby — передача в браузере</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Nearby">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="stylesheet" href="pwa.css"><script defer src="pwa.js"></script>
   <link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48 64x64">
   <link rel="icon" type="image/svg+xml" href="favicon.svg" sizes="any">
   <link rel="apple-touch-icon" href="apple-touch-icon.png" sizes="180x180">
@@ -16,6 +22,16 @@
   <main>
     <section class="intro"><p class="eyebrow">ВАШИ УСТРОЙСТВА. РАССТОЯНИЕ НЕ МЕШАЕТ.</p><h1>Передавайте файлы.<br><em>Между сетями.</em></h1><p class="lead">В одной сети — напрямую. В разных сетях — через интернет. <br>Подключитесь по QR-коду или полной ссылке-приглашению.</p></section>
     <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+    <p id="pwa-status" class="pwa-status" role="status" aria-live="polite" hidden></p>
+    <section id="pwa-install-panel" class="pwa-panel" aria-labelledby="pwa-title">
+      <div><h2 id="pwa-title" data-pwa="title">Nearby на главном экране</h2><p data-pwa="description">Добавьте значок на телефон и открывайте Nearby как отдельное приложение.</p></div>
+      <button id="pwa-install" class="button secondary" type="button" hidden data-pwa="install">Установить Nearby</button>
+      <details id="pwa-help"><summary data-pwa="help">Как установить на телефон</summary>
+        <p id="pwa-android" data-pwa="android">Android: откройте меню браузера ⋮ → «Установить приложение» или «Добавить на главный экран».</p>
+        <p id="pwa-ios" data-pwa="ios">iPhone / iPad: откройте сайт в Safari → «Поделиться» → «На экран “Домой”». Если доступен переключатель «Открывать как веб-приложение», включите его.</p>
+        <p data-pwa="limits">Для подключения нужен интернет. Во время передачи держите Nearby открытым и не блокируйте телефон.</p>
+      </details>
+    </section>
     <section id="start" class="panel start-panel">
       <div><span class="step">01 / НАЧНИТЕ ЗДЕСЬ</span><h2>Свяжите два устройства</h2><p class="muted">Подключение и каждый входящий файл подтверждаются получателем.</p></div>
       <label class="label" for="connection-mode">Как соединить устройства</label><select id="connection-mode"><option value="lan">В одной локальной сети — напрямую</option><option value="internet">Через интернет — любые доступные сети</option></select><p id="mode-help" class="muted"></p>

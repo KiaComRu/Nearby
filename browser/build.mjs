@@ -1,6 +1,7 @@
 import { build } from 'esbuild';
 import { copyFile, mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import './build-pwa.mjs';
 const root = fileURLToPath(new URL('./', import.meta.url));
 await mkdir(root + 'vendor', { recursive: true });
 await build({ entryPoints: [root + '../node_modules/qrcode/lib/browser.js'], bundle: true, platform: 'browser', format: 'iife', globalName: 'QRCode', minify: true, outfile: root + 'vendor/qrcode.js', legalComments: 'inline' });

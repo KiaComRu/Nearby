@@ -1,11 +1,17 @@
 Options -Indexes
 DirectoryIndex index.html
 AddType text/javascript .mjs
+AddType application/manifest+json .webmanifest
 <IfModule mod_headers.c>
 Header always set X-Content-Type-Options "nosniff"
 Header always set Referrer-Policy "no-referrer"
 Header always set Permissions-Policy "camera=(), microphone=(), geolocation=()"
 Header always set Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+</IfModule>
+<IfModule mod_headers.c>
+<FilesMatch "^(?:sw\.js|manifest\.webmanifest|pwa\.js|pwa\.css)$">
+Header set Cache-Control "no-cache"
+</FilesMatch>
 </IfModule>
 <FilesMatch "^(?:config\.private\.php|\.user\.ini|.*\.(?:test|log|json))$">
 Require all denied
