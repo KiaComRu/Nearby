@@ -163,6 +163,7 @@ async function poll() {
   if (!stopped && !link?.peerLimit) pollTimer = setTimeout(poll, 1500);
 }
 function ready(limit) {
+  void reportUsage();
   clearTimeout(connectionTimer); clearTimeout(pollTimer); notice('');
   status('Устройства соединены', 'Выберите файл здесь или на втором устройстве.', true);
   $('transport-label').textContent = session.mode === 'internet' ? 'Интернет · сквозное шифрование' : 'WebRTC · напрямую';
@@ -227,13 +228,19 @@ async function showIncoming(spec) {
   }, true), button('Отклонить', () => link.cancel(spec.id, 'Файл отклонён.')));
 }
 async function reportTransfer(id, size) {
+  return reportStatistics('record-transfer', { id, size });
+}
+async function reportUsage() {
+  return reportStatistics('record-usage');
+}
+async function reportStatistics(action, extra = {}) {
   // Snapshot credentials; statistics failures must never fail a completed file.
-  const body = JSON.stringify({ action: 'record-transfer', room: session.room, token: session.token, id, size });
+  const body = JSON.stringify({ action, room: session.room, token: session.token, ...extra });
   for (const delay of [0, 1500, 5000]) {
     if (delay) await new Promise(resolve => setTimeout(resolve, delay));
     try {
       const response = await fetch('api.php', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer', keepalive: true, signal: AbortSignal.timeout(10000), body });
-      if (response.ok) { document.dispatchEvent(new Event('nearby-transfer-complete')); return; }
+      if (response.ok) { document.dispatchEvent(new Event(action === 'record-usage' ? 'nearby-connection-complete' : 'nearby-transfer-complete')); return; }
       if (response.status < 500 && response.status !== 429) return;
     } catch { /* Retry transient failures while the tab remains open. */ }
   }

@@ -95,6 +95,17 @@ export async function createApp({
   const pin = String(randomInt(0, 1_000_000)).padStart(6, '0');
   const adminToken = token();
   const sessions = new Map();
+  const connectionUsages = new Map();
+  async function recordConnection(req, user, url) {
+    if (user.admin) return;
+    const requested = url.searchParams.get('connection');
+    if (requested !== null && !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(requested)) throw fail(400, 'Некорректный идентификатор подключения.');
+    const id = requested || user.usageId || connectionUsages.get(user.key) || randomUUID();
+    if (connectionUsages.get(user.key) === id) return;
+    connectionUsages.set(user.key, id);
+    try { await reporter?.recordUsage(id); }
+    catch { /* Statistics must not prevent an authenticated connection. */ }
+  }
   const attempts = new Map();
   const offers = new Map();
   const shares = new Map();
@@ -139,6 +150,7 @@ export async function createApp({
   function prune() {
     const now = Date.now();
     for (const [key, value] of sessions) if (now - value.created > sessionTtl) sessions.delete(key);
+    for (const key of connectionUsages.keys()) if (key.startsWith('trusted:') ? !trustedService?.allows(key.slice(8)) : !sessions.has(key)) connectionUsages.delete(key);
     for (const [key, value] of attempts) if (now - value.since > ttl) attempts.delete(key);
     for (const [key, value] of tickets) if (now > value.expires) tickets.delete(key);
     for (const offer of offers.values()) {
@@ -284,12 +296,13 @@ export async function createApp({
         if (!sameSecret(body.pin, pin)) throw fail(401, 'Неверный PIN.');
         if (sessions.size >= 100) throw fail(503, 'Слишком много подключённых устройств.');
         const key = token();
-        sessions.set(key, { device: String(body.device || 'Устройство').slice(0, 60), created: Date.now() });
+        sessions.set(key, { device: String(body.device || 'Устройство').slice(0, 60), created: Date.now(), usageId: randomUUID() });
         json(res, 200, { token: key });
         return;
       }
       if (req.method === 'GET' && url.pathname === '/api/state') {
         const user = auth(req);
+        await recordConnection(req, user, url);
         json(res, 200, {
           admin: user.admin,
           peerConnection: user.admin ? peer.connection : undefined,

@@ -17,11 +17,11 @@ OutFile "${OUTPUT}"
 InstallDir "$LOCALAPPDATA\Programs\Nearby"
 RequestExecutionLevel user
 SetCompressor /SOLID zlib
-VIProductVersion "0.5.0.0"
+VIProductVersion "0.5.1.0"
 VIAddVersionKey "ProductName" "Nearby"
 VIAddVersionKey "FileDescription" "Nearby — локальная передача файлов"
-VIAddVersionKey "FileVersion" "0.5.0"
-VIAddVersionKey "ProductVersion" "0.5.0"
+VIAddVersionKey "FileVersion" "0.5.1"
+VIAddVersionKey "ProductVersion" "0.5.1"
 VIAddVersionKey "LegalCopyright" ""
 !define MUI_ICON "${PAYLOAD}\Nearby.ico"
 !define MUI_UNICON "${PAYLOAD}\Nearby.ico"
@@ -81,7 +81,7 @@ Section "Nearby"
   CreateShortcut "$SMPROGRAMS\Nearby\Nearby.lnk" "$INSTDIR\Nearby.exe"
   CreateShortcut "$DESKTOP\Nearby.lnk" "$INSTDIR\Nearby.exe"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Nearby" "DisplayName" "Nearby"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Nearby" "DisplayVersion" "0.5.0"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Nearby" "DisplayVersion" "0.5.1"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Nearby" "UninstallString" '$\"$INSTDIR\Uninstall.exe$\"'
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Nearby" "DisplayIcon" "$INSTDIR\Nearby.exe"
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Nearby" "NoModify" 1

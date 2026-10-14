@@ -1,7 +1,7 @@
 import http from 'node:http';
 import https from 'node:https';
 import { isIPv4 } from 'node:net';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { pipeline } from 'node:stream/promises';
 import { tlsJson } from './lan-tls.mjs';
 
@@ -57,7 +57,7 @@ export function createLanPeer({ isSelf, trusted = () => null }) {
   }
   function current() { if (!peer) throw fail(409, 'Сначала подключитесь к другому компьютеру.'); return peer; }
   async function state(connection = current()) {
-    const result = await requestJson(connection, '/api/state');
+    const result = await requestJson(connection, '/api/state' + (connection.usageId ? `?connection=${connection.usageId}` : ''));
     if (result.admin !== false || !Array.isArray(result.offers) || !Array.isArray(result.shares) || !Number.isSafeInteger(result.maxSize)) throw fail(502, 'Несовместимый ответ другого ПК.');
     return { admin: false, offers: result.offers, shares: result.shares, maxSize: result.maxSize, peer: { origin: connection.origin, secure: !!connection.secure, fingerprint: connection.secure ? connection.fingerprint : undefined, name: connection.name } };
   }
@@ -107,6 +107,7 @@ export function createLanPeer({ isSelf, trusted = () => null }) {
         connecting = true; const attempt = generation;
         try {
           const connection = await trusted().connection(body.fingerprint, body.address);
+          connection.usageId = randomUUID();
           const result = await state(connection);
           if (attempt !== generation) throw fail(409, 'Подключение отменено.');
           peer = connection; return result;
@@ -117,7 +118,7 @@ export function createLanPeer({ isSelf, trusted = () => null }) {
       if (!/^[0-9]{6}$/.test(body.pin || '') || typeof body.device !== 'string' || !body.device.trim() || body.device.length > 60) throw fail(400, 'Введите шестизначный PIN и имя этого компьютера.');
       connecting = true; const attempt = generation;
       try {
-        const connection = { origin };
+        const connection = { origin, usageId: randomUUID() };
         let info;
         try { info = await requestJson(connection, '/api/info', null, false); }
         catch (error) { if (error.status === 404) throw fail(409, 'Обновите Nearby на обоих ПК до версии 0.2.2 или новее.'); throw error; }

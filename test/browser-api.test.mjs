@@ -38,7 +38,7 @@ test('PHP signaling protects rooms, approval, roles, payloads and one-use invita
     const initialStats = await request({ action: 'stats' });
     assert.equal(initialStats.files, 0); assert.equal(initialStats.bytes, 0);
     assert.ok(Number.isFinite(Date.parse(initialStats.startedAt)));
-    assert.deepEqual(Object.keys(initialStats).sort(), ['bytes', 'files', 'startedAt', 'updatedAt']);
+    assert.deepEqual(Object.keys(initialStats).sort(), ['bytes', 'files', 'startedAt', 'updatedAt', 'uses', 'usesStartedAt']);
     await request({ action: 'record-transfer', id: '12345678-1234-1234-1234-123456789abc', size: 1 }, 400);
     const host = await request({ action: 'create', name: 'ПК' }, 201);
     const auth = { room: host.room, token: host.token };

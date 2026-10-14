@@ -4,8 +4,8 @@ import path from 'node:path';
 
 export const STATISTICS_ENDPOINT = 'https://nearby.kiacom.ru/web/api.php';
 const retention = 7 * 86400;
-const validEvent = event => event && /^[a-f0-9-]{36}$/.test(event.id) && Number.isSafeInteger(event.size) &&
-  event.size >= 0 && event.size <= 100 * 1024 ** 3 && Number.isSafeInteger(event.completedAt) &&
+const validEvent = event => event && /^[a-f0-9-]{36}$/.test(event.id) &&
+  (event.kind === 'usage' ? event.size === undefined : event.kind === undefined && Number.isSafeInteger(event.size) && event.size >= 0 && event.size <= 100 * 1024 ** 3) && Number.isSafeInteger(event.completedAt) &&
   ['windows', 'local'].includes(event.source);
 
 export function createStatisticsReporter({ storage, endpoint = STATISTICS_ENDPOINT, source = 'local', fetchImpl = fetch, retryMs = 60000 } = {}) {
@@ -53,7 +53,7 @@ export function createStatisticsReporter({ storage, endpoint = STATISTICS_ENDPOI
       while (!closed && queue.length) {
         const event = queue[0];
         if (event.completedAt < Math.floor(Date.now() / 1000) - retention) {
-          await change(items => items.filter(item => item.id !== event.id)); continue;
+          await change(items => items.filter(item => item.id !== event.id || item.kind !== event.kind)); continue;
         }
         try {
           if (!sessionToken) {
@@ -61,15 +61,16 @@ export function createStatisticsReporter({ storage, endpoint = STATISTICS_ENDPOI
             if (typeof session.token !== 'string' || !/^[a-f0-9.]+$/.test(session.token)) throw new Error('Invalid statistics session');
             sessionToken = session.token;
           }
-          await post({ action: 'record-local-transfer', token: sessionToken, ...event });
+          const { kind, ...payload } = event;
+          await post({ action: kind === 'usage' ? 'record-local-usage' : 'record-local-transfer', token: sessionToken, ...payload });
         } catch (error) {
           if ([400, 409, 410].includes(error.status)) {
-            await change(items => items.filter(item => item.id !== event.id)); continue;
+            await change(items => items.filter(item => item.id !== event.id || item.kind !== event.kind)); continue;
           }
           if (error.status === 403) sessionToken = null;
           break;
         }
-        await change(items => items.filter(item => item.id !== event.id));
+        await change(items => items.filter(item => item.id !== event.id || item.kind !== event.kind));
         cachedAt = 0;
       }
     })().catch(() => { /* Preserve the outbox on storage/network errors. */ }).finally(() => { flushing = null; });
@@ -77,26 +78,28 @@ export function createStatisticsReporter({ storage, endpoint = STATISTICS_ENDPOI
   }
   const timer = setInterval(() => { void flush(); }, retryMs); timer.unref?.();
   void loaded.then(() => flush()).catch(() => {});
-  return {
-    async record(id, size) {
+  async function recordEvent(event) {
       if (closed) return;
-      const event = { id, size, completedAt: Math.floor(Date.now() / 1000), source };
       if (!validEvent(event)) return;
       await change(items => {
         const current = items.filter(item => item.completedAt >= event.completedAt - retention);
-        if (current.some(item => item.id === id)) return current;
+        if (current.some(item => item.id === event.id && item.kind === event.kind)) return current;
         if (current.length >= 1000) throw new Error('Statistics outbox full');
         return [...current, event];
       });
       void flush();
-    },
+  }
+  return {
+    record(id, size) { return recordEvent({ id, size, completedAt: Math.floor(Date.now() / 1000), source }); },
+    recordUsage(id) { return recordEvent({ kind: 'usage', id, completedAt: Math.floor(Date.now() / 1000), source }); },
     async getStats() {
       if (closed) return null;
       if (cache && Date.now() - cachedAt < 60000) return cache;
       if (reading) return reading;
       reading = post({ action: 'stats' }).then(result => {
         if (!Number.isSafeInteger(result.files) || result.files < 0 || !Number.isSafeInteger(result.bytes) || result.bytes < 0 || !Number.isFinite(Date.parse(result.startedAt))) throw new Error('Invalid statistics');
-        cache = { files: result.files, bytes: result.bytes, startedAt: result.startedAt, updatedAt: result.updatedAt };
+        if (result.uses !== undefined && (!Number.isSafeInteger(result.uses) || result.uses < 0)) throw new Error('Invalid usage statistics');
+        cache = { files: result.files, bytes: result.bytes, uses: result.uses ?? null, usesStartedAt: result.usesStartedAt ?? null, startedAt: result.startedAt, updatedAt: result.updatedAt };
         cachedAt = Date.now(); return cache;
       }).catch(() => null).finally(() => { reading = null; });
       return reading;

@@ -69,15 +69,16 @@ try {
 
     if ($action === 'stats') reply(200, transferStatistics($base));
     if ($action === 'local-session') reply(201, ['token' => localStatisticsToken($base)]);
-    if ($action === 'record-local-transfer') {
+    if (in_array($action, ['record-local-transfer', 'record-local-usage'], true)) {
+        $usage = $action === 'record-local-usage';
         if (!verifyLocalStatisticsToken($base, $input['token'] ?? null)) fail(403, 'Недействительный ключ статистики.');
-        $id = $input['id'] ?? null; $size = $input['size'] ?? null; $completedAt = $input['completedAt'] ?? null;
+        $id = $input['id'] ?? null; $size = $usage ? 0 : ($input['size'] ?? null); $completedAt = $input['completedAt'] ?? null;
         if (!is_string($id) || !preg_match('/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/D', $id) ||
             !is_int($size) || $size < 0 || $size > 100 * 1024 ** 3 || !is_int($completedAt) ||
             !in_array($input['source'] ?? null, ['windows', 'local'], true)) fail(400, 'Некорректная передача.');
         if ($completedAt < $now - 7 * 86400 || $completedAt > $now + 60) fail(410, 'Срок отчёта истёк или время устройства некорректно.');
         $day = intdiv($completedAt, 86400);
-        reply(200, transferStatistics($base, ['room' => 'local-' . $day, 'id' => $id, 'size' => $size,
+        reply(200, transferStatistics($base, ['room' => ($usage ? 'local-usage-' : 'local-') . $day, 'id' => $id, 'size' => $size, 'kind' => $usage ? 'usage' : 'transfer',
             'expires' => ($day + 8) * 86400 + 60, 'limit' => 50000]));
     }
 
@@ -140,6 +141,13 @@ try {
     if ($relayRequest) {
         $result = relayAction($action, $input, $state, $role, $base, $now, $config['relayDailyBytes'] ?? 5 * 1024 ** 3);
         writeState($f, $state); flock($f, LOCK_UN); fclose($f); reply(200, $result);
+    }
+    if ($action === 'record-usage') {
+        if (!$state['approved']) fail(403, 'Сначала подтвердите устройство.');
+        // Both endpoints report protocol readiness; a room identifies one connection.
+        // Do not store session tokens or device identities in the statistics ledger.
+        $result = transferStatistics($base, ['room' => $room, 'id' => 'connection', 'kind' => 'usage', 'expires' => $state['expires']]);
+        flock($f, LOCK_UN); fclose($f); reply(200, $result);
     }
     if ($action === 'record-transfer') {
         if (!$state['approved']) fail(403, 'Сначала подтвердите устройство.');

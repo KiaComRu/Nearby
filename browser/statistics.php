@@ -37,20 +37,27 @@ function transferStatistics(string $base, ?array $report = null): array {
             : ['files' => 0, 'bytes' => 0, 'startedAt' => gmdate('c'), 'updatedAt' => null, 'rooms' => []];
         if (!is_array($data) || !is_int($data['files'] ?? null) || !is_int($data['bytes'] ?? null) || !is_array($data['rooms'] ?? null)) throw new RuntimeException('Invalid statistics');
         $changed = !is_file($path);
+        // Existing file/byte totals are retained; historical connections were not recorded.
+        if (!array_key_exists('uses', $data)) { $data['uses'] = 0; $data['usesStartedAt'] = gmdate('c'); $changed = true; }
+        if (!is_int($data['uses']) || $data['uses'] < 0 || !is_string($data['usesStartedAt'] ?? null)) throw new RuntimeException('Invalid usage statistics');
         if ($report !== null) {
             foreach ($data['rooms'] as $key => $entry) {
                 if ($entry['expires'] < $now) unset($data['rooms'][$key]);
             }
-            $room = $report['room']; $id = $report['id']; $size = $report['size'];
+            $usage = ($report['kind'] ?? 'transfer') === 'usage';
+            $room = $report['room']; $id = $report['id']; $size = $usage ? 0 : $report['size'];
+            $bucket = $usage ? 'usages' : 'transfers';
             $entry = $data['rooms'][$room] ?? ['expires' => $report['expires'], 'transfers' => []];
-            if (array_key_exists($id, $entry['transfers'])) {
-                if ($entry['transfers'][$id] !== $size) fail(409, 'Размер уже учтённой передачи отличается.');
+            $entry[$bucket] ??= [];
+            if (array_key_exists($id, $entry[$bucket])) {
+                if ($entry[$bucket][$id] !== $size) fail(409, 'Размер уже учтённой передачи отличается.');
             } else {
-                if (count($entry['transfers']) >= ($report['limit'] ?? 1000)) fail(429, 'Лимит статистики исчерпан.');
-                if ($data['bytes'] > 9007199254740991 - $size || $data['files'] >= 9007199254740991) throw new RuntimeException('Statistics overflow');
-                $entry['transfers'][$id] = $size;
+                if (count($entry[$bucket]) >= ($report['limit'] ?? 1000)) fail(429, 'Лимит статистики исчерпан.');
+                if ($usage ? $data['uses'] >= 9007199254740991 : ($data['bytes'] > 9007199254740991 - $size || $data['files'] >= 9007199254740991)) throw new RuntimeException('Statistics overflow');
+                $entry[$bucket][$id] = $size;
                 $data['rooms'][$room] = $entry;
-                $data['files']++; $data['bytes'] += $size; $data['updatedAt'] = gmdate('c');
+                if ($usage) $data['uses']++; else { $data['files']++; $data['bytes'] += $size; }
+                $data['updatedAt'] = gmdate('c');
                 $changed = true;
             }
         }
@@ -60,7 +67,7 @@ function transferStatistics(string $base, ?array $report = null): array {
             $json = json_encode($data, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
             if (file_put_contents($temporary, $json) !== strlen($json) || !rename($temporary, $path)) throw new RuntimeException('Statistics save failed');
         }
-        return array_intersect_key($data, array_flip(['files', 'bytes', 'startedAt', 'updatedAt']));
+        return array_intersect_key($data, array_flip(['files', 'bytes', 'uses', 'usesStartedAt', 'startedAt', 'updatedAt']));
     } finally {
         if ($temporary && is_file($temporary)) unlink($temporary);
         flock($lock, LOCK_UN); fclose($lock);
