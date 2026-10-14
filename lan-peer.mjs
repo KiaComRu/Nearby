@@ -86,7 +86,7 @@ export function createLanPeer({ isSelf, trusted = () => null }) {
     }
   }
   return {
-    get connection() { return peer ? { origin: peer.origin, secure: !!peer.secure, fingerprint: peer.secure ? peer.fingerprint : undefined } : null; },
+    get connection() { return peer ? { id: peer.usageId, name: peer.name, origin: peer.origin, secure: !!peer.secure, fingerprint: peer.secure ? peer.fingerprint : undefined } : null; },
     async diagnose(address) {
       const origin = lanOrigin(address);
       if (isSelf(new URL(origin))) return { ok: false, code: 'self-address', message: 'Это адрес этого компьютера. Выберите другой ПК.' };
@@ -123,6 +123,7 @@ export function createLanPeer({ isSelf, trusted = () => null }) {
         try { info = await requestJson(connection, '/api/info', null, false); }
         catch (error) { if (error.status === 404) throw fail(409, 'Обновите Nearby на обоих ПК до версии 0.2.2 или новее.'); throw error; }
         if (info.product !== 'Nearby' || info.protocol !== 'nearby-lan/1') throw fail(400, 'Обновите Nearby на обоих ПК до версии 0.2.2 или новее.');
+        connection.name = typeof info.secure?.name === 'string' ? info.secure.name : new URL(origin).hostname;
         const joined = await requestJson(connection, '/api/join', { pin: body.pin, device: body.device.trim() }, false);
         if (!/^[a-f0-9]{48}$/.test(joined.token || '')) throw fail(502, 'Другой ПК вернул некорректный ключ.');
         connection.token = joined.token;
@@ -132,6 +133,11 @@ export function createLanPeer({ isSelf, trusted = () => null }) {
       } finally { connecting = false; }
     },
     state,
+    async leave() {
+      if (!peer) return;
+      try { await requestJson(peer, '/api/leave', {}, true, 1500); }
+      catch { /* Old or unreachable peers expire presence without blocking disconnect. */ }
+    },
     disconnect() {
       generation++; peer = null; downloads.clear();
       for (const request of requests) { if (request.abort) request.abort(); else request.destroy(); }

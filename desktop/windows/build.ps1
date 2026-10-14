@@ -97,10 +97,10 @@ if ($Target -eq 'Server2016') {
 } else {
     $taskCompilerArgs += @('/reference:System.dll', '/reference:System.Core.dll', '/reference:System.Drawing.dll', '/reference:System.Windows.Forms.dll', '/reference:System.Web.Extensions.dll')
 }
-$taskCompilerArgs += @("/reference:$(Join-Path $taskStage 'Microsoft.Web.WebView2.Core.dll')", "/reference:$(Join-Path $taskStage 'Microsoft.Web.WebView2.WinForms.dll')", (Join-Path $PSScriptRoot 'Launcher.cs'))
+$taskCompilerArgs += @("/reference:$(Join-Path $taskStage 'Microsoft.Web.WebView2.Core.dll')", "/reference:$(Join-Path $taskStage 'Microsoft.Web.WebView2.WinForms.dll')", (Join-Path $PSScriptRoot 'Launcher.cs'), (Join-Path $PSScriptRoot 'ShellIntegration.cs'))
 & $taskCompiler @taskCompilerArgs
 if ($LASTEXITCODE -ne 0) { throw 'Ошибка компиляции Windows-приложения.' }
-$taskSetup = Join-Path $taskArtifacts "Nearby-0.5.1-$taskPlatform-setup.exe"
+$taskSetup = Join-Path $taskArtifacts "Nearby-0.5.2-$taskPlatform-setup.exe"
 $taskInstallerArgs = @('/V2', "/DPAYLOAD=$taskStage", "/DOUTPUT=$taskSetup")
 if ($Target -eq 'Server2016') { $taskInstallerArgs += '/DSERVER2016' }
 $taskInstallerArgs += (Join-Path $PSScriptRoot 'installer.nsi')
@@ -111,7 +111,7 @@ $taskSetupStream = [IO.File]::OpenRead($taskSetup)
 try { $taskSetupHash = [BitConverter]::ToString($taskSetupHasher.ComputeHash($taskSetupStream)).Replace('-','').ToLowerInvariant() }
 finally { $taskSetupStream.Dispose(); $taskSetupHasher.Dispose() }
 $taskManifest = [ordered]@{
-    product = 'Nearby'; version = '0.5.1'; platform = $taskPlatform; node = $taskNodeVersion
+    product = 'Nearby'; version = '0.5.2'; platform = $taskPlatform; node = $taskNodeVersion
     webView2Sdk = $taskWebVersion; builtAt = [DateTime]::UtcNow.ToString('o')
     installer = [IO.Path]::GetFileName($taskSetup)
     sha256 = $taskSetupHash

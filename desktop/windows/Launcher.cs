@@ -14,8 +14,8 @@ using Microsoft.Web.WebView2.WinForms;
 
 [assembly: System.Reflection.AssemblyTitle("Nearby")]
 [assembly: System.Reflection.AssemblyDescription("Передача файлов по локальной сети")]
-[assembly: System.Reflection.AssemblyVersion("0.5.1.0")]
-[assembly: System.Reflection.AssemblyFileVersion("0.5.1.0")]
+[assembly: System.Reflection.AssemblyVersion("0.5.2.0")]
+[assembly: System.Reflection.AssemblyFileVersion("0.5.2.0")]
 #if SERVER2016
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.6.2")]
 #endif
@@ -23,19 +23,32 @@ using Microsoft.Web.WebView2.WinForms;
 internal static class Program
 {
     [STAThread]
-    private static void Main()
+    private static void Main(string[] args)
     {
+        string[] files = new string[0];
+        if (args.Length > 0) {
+            if (args[0] != "--send" || args.Length < 2 || args.Length > 101) {
+                MessageBox.Show("Выберите до 100 файлов и используйте «Отправить через Nearby».", "Nearby"); return;
+            }
+            files = new string[args.Length - 1]; Array.Copy(args, 1, files, 0, files.Length);
+        }
         bool acquired;
-        using (var singleInstance = new Mutex(true, "Local\\Nearby.Transfer.Windows", out acquired))
+        using (var singleInstance = new Mutex(true, "Local\\" + ShellInbox.Name, out acquired))
         {
             if (!acquired)
             {
-                MessageBox.Show("Nearby уже запущен. Откройте его окно на панели задач.", "Nearby");
+                if (!ShellInbox.Forward(files)) MessageBox.Show("Не удалось передать файлы открытому Nearby. Дождитесь запуска приложения и повторите команду.", "Nearby");
                 return;
             }
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new NearbyWindow());
+            using (var window = new NearbyWindow()) {
+                var handle = window.Handle;
+                using (var inbox = new ShellInbox(selection => window.BeginInvoke((Action)delegate { window.QueueShellFiles(selection); }))) {
+                    window.QueueShellFiles(files);
+                    Application.Run(window);
+                }
+            }
         }
     }
 }
@@ -49,6 +62,44 @@ internal sealed class NearbyWindow : Form
     private bool shuttingDown;
     private bool engineStopping;
     private string origin;
+    private bool webReady, applyingShellFiles;
+    private readonly List<string> shellFiles = new List<string>();
+    private readonly System.Windows.Forms.Timer shellTimer = new System.Windows.Forms.Timer();
+    private DateTime lastShellRequest;
+
+    internal void QueueShellFiles(string[] paths)
+    {
+        if (shuttingDown) return;
+        if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+        Show(); Activate();
+        foreach (string value in paths) {
+            try {
+                if (!Path.IsPathRooted(value) || !File.Exists(value)) throw new IOException();
+                string file = Path.GetFullPath(value);
+                if (!shellFiles.Exists(existing => String.Equals(existing, file, StringComparison.OrdinalIgnoreCase))) shellFiles.Add(file);
+            } catch (Exception) { MessageBox.Show(this, "Файл недоступен или выбрана папка:\n" + value + "\n\nДля папки сначала создайте ZIP-архив.", "Nearby"); }
+        }
+        lastShellRequest = DateTime.UtcNow;
+    }
+
+    private async Task ApplyShellFiles()
+    {
+        if (!webReady || applyingShellFiles || shellFiles.Count == 0 || (DateTime.UtcNow - lastShellRequest).TotalMilliseconds < 500) return;
+        applyingShellFiles = true;
+        string[] files = shellFiles.GetRange(0, Math.Min(100, shellFiles.Count)).ToArray();
+        shellFiles.RemoveRange(0, files.Length);
+        try {
+            var serializer = new JavaScriptSerializer();
+            var document = serializer.Deserialize<Dictionary<string, object>>(await web.CoreWebView2.CallDevToolsProtocolMethodAsync("DOM.getDocument", "{}"));
+            var root = (Dictionary<string, object>)document["root"];
+            var node = serializer.Deserialize<Dictionary<string, object>>(await web.CoreWebView2.CallDevToolsProtocolMethodAsync("DOM.querySelector", serializer.Serialize(new { nodeId = root["nodeId"], selector = "#shell-files" })));
+            if (Convert.ToInt32(node["nodeId"]) == 0) throw new IOException("Перезапустите Nearby, чтобы открыть выбор получателя.");
+            await web.CoreWebView2.CallDevToolsProtocolMethodAsync("DOM.setFileInputFiles", serializer.Serialize(new { nodeId = node["nodeId"], files = files }));
+            await web.CoreWebView2.ExecuteScriptAsync("document.dispatchEvent(new Event('nearby-shell-selection')); document.getElementById('shell-files').value = ''; ");
+        } catch (Exception error) {
+            MessageBox.Show(this, "Не удалось добавить файлы из Проводника. Повторите команду.\n\n" + error.Message, "Nearby");
+        } finally { applyingShellFiles = false; }
+    }
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     private static extern int SHGetKnownFolderPath(ref Guid id, uint flags, IntPtr token, out IntPtr path);
@@ -80,7 +131,10 @@ internal sealed class NearbyWindow : Form
         web.Visible = false;
         Controls.Add(web); Controls.Add(loading);
         Load += async delegate { await StartAsync(); };
-        FormClosing += delegate { shuttingDown = true; StopEngine(); };
+        shellTimer.Interval = 300;
+        shellTimer.Tick += async delegate { await ApplyShellFiles(); };
+        shellTimer.Start();
+        FormClosing += delegate { shuttingDown = true; shellTimer.Stop(); shellTimer.Dispose(); StopEngine(); };
     }
 
     private async Task StartAsync()
@@ -127,6 +181,8 @@ internal sealed class NearbyWindow : Form
             web.CoreWebView2.Settings.IsStatusBarEnabled = false;
             web.CoreWebView2.Settings.IsPasswordAutosaveEnabled = false;
             web.CoreWebView2.Settings.IsGeneralAutofillEnabled = false;
+            web.CoreWebView2.NavigationStarting += delegate { webReady = false; };
+            web.CoreWebView2.NavigationCompleted += delegate(object sender, CoreWebView2NavigationCompletedEventArgs e) { webReady = e.IsSuccess; };
             web.CoreWebView2.NavigationStarting += delegate(object sender, CoreWebView2NavigationStartingEventArgs e) {
                 Uri target;
                 if (!Uri.TryCreate(e.Uri, UriKind.Absolute, out target) || target.GetLeftPart(UriPartial.Authority) != origin) e.Cancel = true;

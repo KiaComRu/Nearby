@@ -70,8 +70,8 @@ test('Windows distribution contains program files without prototype storage', as
   catch (error) { if (error.code === 'ENOENT') { t.skip('Build Windows payload first.'); return; } throw error; }
   assert.deepEqual(entries.sort(), ['desktop', 'device-identity.mjs', 'lan-discovery.mjs', 'lan-peer.mjs', 'lan-tls.mjs', 'node_modules', 'package-lock.json', 'package.json', 'public', 'server.mjs', 'transfer-statistics.mjs', 'trusted-lan.mjs']);
   assert.deepEqual(await readdir(path.join(staged, 'desktop/windows')), ['host.mjs']);
-  assert.deepEqual((await readdir(path.join(staged, 'public'))).sort(), ['app.js', 'apple-touch-icon.png', 'favicon.ico', 'favicon.svg', 'index.html', 'statistics.js', 'styles.css']);
-  for (const file of ['server.mjs', 'device-identity.mjs', 'lan-discovery.mjs', 'lan-peer.mjs', 'lan-tls.mjs', 'trusted-lan.mjs', 'transfer-statistics.mjs', 'desktop/windows/host.mjs', 'public/app.js', 'public/index.html', 'public/styles.css']) {
+  assert.deepEqual((await readdir(path.join(staged, 'public'))).sort(), ['app.js', 'apple-touch-icon.png', 'favicon.ico', 'favicon.svg', 'index.html', 'shell-send.css', 'shell-send.js', 'statistics.js', 'styles.css']);
+  for (const file of ['server.mjs', 'device-identity.mjs', 'lan-discovery.mjs', 'lan-peer.mjs', 'lan-tls.mjs', 'trusted-lan.mjs', 'transfer-statistics.mjs', 'desktop/windows/host.mjs', 'public/app.js', 'public/index.html', 'public/styles.css', 'public/shell-send.js', 'public/shell-send.css']) {
     assert.deepEqual(await readFile(path.join(staged, file)), await readFile(path.join(project, file)), `Staged ${file} must match current source`);
   }
 });

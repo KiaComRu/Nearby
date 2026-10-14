@@ -100,7 +100,7 @@ export async function createTrustedLan({ storage, host, httpPort, version, trans
       }
       if (req.method === 'POST' && route === '/v1/revoke') { authentication(req); await revoke(remote.fingerprint, false); reply(res, 200, { ok: true }); return; }
       authentication(req);
-      if (!((req.method === 'GET' && (route === '/api/state' || /^\/api\/shares\/[a-f0-9-]{36}\/download$/.test(route))) ||
+      if (!((req.method === 'POST' && route === '/api/leave') || (req.method === 'GET' && (route === '/api/state' || /^\/api\/shares\/[a-f0-9-]{36}\/download$/.test(route))) ||
           (req.method === 'POST' && (/^\/api\/offers(?:\/[a-f0-9-]{36}\/upload)?$/.test(route) || /^\/api\/shares\/[a-f0-9-]{36}\/ticket$/.test(route))))) throw fail(403, 'Операция недоступна для доверенного устройства.');
       await transferHandler(req, res);
     } catch (error) { if (!res.headersSent && !res.destroyed) reply(res, error.status || 500, { error: error.status ? error.message : 'Не удалось выполнить защищённую операцию.', code: error.code }); else res.destroy(); }

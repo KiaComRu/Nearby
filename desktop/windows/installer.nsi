@@ -17,11 +17,11 @@ OutFile "${OUTPUT}"
 InstallDir "$LOCALAPPDATA\Programs\Nearby"
 RequestExecutionLevel user
 SetCompressor /SOLID zlib
-VIProductVersion "0.5.1.0"
+VIProductVersion "0.5.2.0"
 VIAddVersionKey "ProductName" "Nearby"
 VIAddVersionKey "FileDescription" "Nearby — локальная передача файлов"
-VIAddVersionKey "FileVersion" "0.5.1"
-VIAddVersionKey "ProductVersion" "0.5.1"
+VIAddVersionKey "FileVersion" "0.5.2"
+VIAddVersionKey "ProductVersion" "0.5.2"
 VIAddVersionKey "LegalCopyright" ""
 !define MUI_ICON "${PAYLOAD}\Nearby.ico"
 !define MUI_UNICON "${PAYLOAD}\Nearby.ico"
@@ -80,8 +80,16 @@ Section "Nearby"
   CreateDirectory "$SMPROGRAMS\Nearby"
   CreateShortcut "$SMPROGRAMS\Nearby\Nearby.lnk" "$INSTDIR\Nearby.exe"
   CreateShortcut "$DESKTOP\Nearby.lnk" "$INSTDIR\Nearby.exe"
+  ; Explorer invokes the existing user instance through Nearby's private pipe.
+  SetRegView 64
+  WriteRegStr HKCU "Software\Classes\*\shell\Nearby.Send" "" "Отправить через Nearby"
+  WriteRegStr HKCU "Software\Classes\*\shell\Nearby.Send" "Icon" '$\"$INSTDIR\Nearby.exe$\",0'
+  WriteRegStr HKCU "Software\Classes\*\shell\Nearby.Send" "MultiSelectModel" "Player"
+  WriteRegStr HKCU "Software\Classes\*\shell\Nearby.Send\command" "" '$\"$INSTDIR\Nearby.exe$\" --send $\"%1$\"'
+  SetRegView 32
+  CreateShortcut "$SENDTO\Nearby.lnk" "$INSTDIR\Nearby.exe" "--send"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Nearby" "DisplayName" "Nearby"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Nearby" "DisplayVersion" "0.5.1"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Nearby" "DisplayVersion" "0.5.2"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Nearby" "UninstallString" '$\"$INSTDIR\Uninstall.exe$\"'
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Nearby" "DisplayIcon" "$INSTDIR\Nearby.exe"
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Nearby" "NoModify" 1
@@ -101,6 +109,10 @@ Section "Uninstall"
   Abort
   safe:
   Delete "$DESKTOP\Nearby.lnk"
+  Delete "$SENDTO\Nearby.lnk"
+  SetRegView 64
+  DeleteRegKey HKCU "Software\Classes\*\shell\Nearby.Send"
+  SetRegView 32
   Delete "$SMPROGRAMS\Nearby\Nearby.lnk"
   RMDir "$SMPROGRAMS\Nearby"
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Nearby"

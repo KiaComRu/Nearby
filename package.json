@@ -1,6 +1,6 @@
 {
   "name": "nearby-transfer",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "private": true,
   "description": "Nearby — передача файлов по локальной сети и через интернет",
   "type": "module",
@@ -16,6 +16,8 @@
     "build:pwa-icons": "node scripts/generate-pwa-icons.mjs",
     "test:pwa": "node scripts/pwa-e2e.mjs",
     "test:usage": "node scripts/usage-e2e.mjs",
+    "test:shell": "node scripts/shell-e2e.mjs",
+    "test:shell:native": "node scripts/shell-native-smoke.mjs",
     "build:icons": "node scripts/generate-favicons.mjs",
     "test:web": "node --test test/browser-*.test.mjs",
     "test:browser": "node scripts/browser-e2e.mjs",

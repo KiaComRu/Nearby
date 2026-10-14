@@ -9,14 +9,27 @@
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" sizes="any">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180">
   <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/shell-send.css">
   <script src="/app.js" defer></script>
   <script src="/statistics.js" defer></script>
+  <script src="/shell-send.js" defer></script>
 </head>
 <body>
   <header><a class="brand" href="/">↗ <span>nearby<span class="dot">.</span></span></a><span class="badge">Локальная передача · прототип</span></header>
   <main>
     <div class="intro"><div class="eyebrow">ОДНА СЕТЬ. ЛЮБЫЕ ФАЙЛЫ.</div><h1>Ближе устройства.<br><span>Быстрее передача.</span></h1><p>Между двумя компьютерами, компьютером и телефоном.<br>Файлы передаются напрямую по локальной сети.</p></div>
     <p id="message" class="notice" role="status" aria-live="polite" hidden></p>
+    <button id="shell-reopen" type="button" hidden>Файлы из Проводника</button>
+    <input id="shell-files" type="file" multiple hidden aria-label="Файлы из Проводника">
+    <dialog id="shell-send" aria-labelledby="shell-heading">
+      <div class="shell-heading"><div><div class="step">ИЗ ПРОВОДНИКА</div><h2 id="shell-heading">Кому отправить файлы?</h2></div><button id="shell-close" type="button" class="secondary" aria-label="Закрыть выбор получателя">Закрыть</button></div>
+      <p>Выберите подключённое устройство. Получатель подтвердит приём или скачает предложенные файлы.</p>
+      <label for="shell-target">Устройство-получатель</label><select id="shell-target"></select>
+      <p id="shell-status" role="status" aria-live="polite"></p>
+      <div id="shell-queue" class="file-list" aria-live="polite"></div>
+      <div class="shell-actions"><button id="shell-start" type="button" disabled>Отправить</button><button id="shell-cancel" type="button" class="secondary" hidden>Остановить отправку</button><button id="shell-clear" type="button" class="secondary">Убрать файлы</button></div>
+      <p class="subtle">Нет нужного устройства? Закройте это окно и подключитесь в Nearby — выбранные файлы сохранятся здесь. Для папки сначала создайте ZIP-архив. Интернет-подключения веб-версии открываются отдельно в браузере.</p>
+    </dialog>
     <section class="panel internet-mode"><div class="step">РАЗНЫЕ СЕТИ</div><h2>Подключиться через интернет</h2><p>Для разных Wi-Fi и мобильной сети откройте интернет-режим в браузере. Создайте приглашение и отправьте ссылку на второе устройство. До 100 МиБ на файл, оба устройства должны оставаться онлайн. Зашифрованные части временно проходят через сервер Nearby.</p><a class="internet-link" href="https://nearby.kiacom.ru/web/#mode=internet" target="_blank" rel="noopener">Открыть интернет-режим ↗</a></section>
     <section id="join" class="panel" hidden>
       <div class="step">01 / ПОДКЛЮЧЕНИЕ</div><h2>Давайте познакомим устройства</h2>

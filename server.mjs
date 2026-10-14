@@ -106,6 +106,9 @@ export async function createApp({
     try { await reporter?.recordUsage(id); }
     catch { /* Statistics must not prevent an authenticated connection. */ }
   }
+  // Active clients refresh /api/state; discovery and saved trust are not connections.
+  const connectedDevices = new Map();
+  const presenceTtl = 45_000;
   const attempts = new Map();
   const offers = new Map();
   const shares = new Map();
@@ -131,7 +134,7 @@ export async function createApp({
   }
   const publicOffer = ({ id, name, size, state, created, received, device, error, secure }) =>
     ({ id, name, size, state, created, received, device, error, secure });
-  const publicShare = ({ id, name, size }) => ({ id, name, size });
+  const publicShare = ({ id, name, size, recipientName }) => ({ id, name, size, recipientName });
 
   function auth(req, adminOnly = false) {
     if (req.socket.encrypted) { if (adminOnly) throw fail(403, 'Нужен локальный владелец.'); return trustedService.authentication(req); }
@@ -151,6 +154,9 @@ export async function createApp({
     const now = Date.now();
     for (const [key, value] of sessions) if (now - value.created > sessionTtl) sessions.delete(key);
     for (const key of connectionUsages.keys()) if (key.startsWith('trusted:') ? !trustedService?.allows(key.slice(8)) : !sessions.has(key)) connectionUsages.delete(key);
+    for (const [key, value] of connectedDevices) {
+      if (now - value.lastSeen > presenceTtl || (value.fingerprint ? !trustedService?.allows(value.fingerprint) : !sessions.has(key))) connectedDevices.delete(key);
+    }
     for (const [key, value] of attempts) if (now - value.since > ttl) attempts.delete(key);
     for (const [key, value] of tickets) if (now > value.expires) tickets.delete(key);
     for (const offer of offers.values()) {
@@ -202,6 +208,8 @@ export async function createApp({
   const staticFiles = new Map([
     ['/', ['index.html', 'text/html; charset=utf-8']],
     ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
+    ['/shell-send.js', ['shell-send.js', 'text/javascript; charset=utf-8']],
+    ['/shell-send.css', ['shell-send.css', 'text/css; charset=utf-8']],
     ['/statistics.js', ['statistics.js', 'text/javascript; charset=utf-8']],
     ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
     ['/favicon.ico', ['favicon.ico', 'image/x-icon']],
@@ -224,6 +232,18 @@ export async function createApp({
         throw fail(403, 'Запрос с другого сайта запрещён.');
       }
       prune();
+      if (req.method === 'GET' && url.pathname === '/api/send-targets') {
+        auth(req, true);
+        const targets = [...connectedDevices.values()].map(({ id, name, secure }) => ({ id, name, secure, kind: 'client', maxSize }));
+        const connection = peer.connection;
+        if (connection) {
+          try {
+            const remote = await peer.state();
+            if (peer.connection?.id === connection.id) targets.unshift({ id: connection.id, name: remote.peer.name || connection.origin, secure: connection.secure, kind: 'peer', maxSize: remote.maxSize });
+          } catch { /* An unreachable saved connection is not a send target. */ }
+        }
+        json(res, 200, { targets }); return;
+      }
       if (req.method === 'GET' && url.pathname === '/api/info') {
         json(res, 200, { product: 'Nearby', protocol: 'nearby-lan/1', version, secure: trustedService?.publicIdentity }); return;
       }
@@ -264,12 +284,15 @@ export async function createApp({
           json(res, 200, { ...remote, localAdmin: true, receivedDirectory: inbox }); return;
         }
         if (req.method === 'POST' && url.pathname === '/api/peer/disconnect') {
+          await peer.leave();
           peer.disconnect(); json(res, 200, { ok: true }); return;
         }
         if (req.method === 'GET' && url.pathname === '/api/peer/remote/api/state') {
+          if (req.headers['x-nearby-peer'] && req.headers['x-nearby-peer'] !== peer.connection?.id) throw fail(409, 'Подключение изменилось. Выберите получателя ещё раз.');
           json(res, 200, { ...await peer.state(), localAdmin: true, receivedDirectory: inbox }); return;
         }
         if (url.pathname.startsWith('/api/peer/remote/')) {
+          if (req.headers['x-nearby-peer'] && req.headers['x-nearby-peer'] !== peer.connection?.id) throw fail(409, 'Подключение изменилось. Выберите получателя ещё раз.');
           const result = await peer.proxy(req, res, url.pathname.slice('/api/peer/remote'.length));
           if (result) json(res, 200, result);
           return;
@@ -300,17 +323,26 @@ export async function createApp({
         json(res, 200, { token: key });
         return;
       }
+      if (req.method === 'POST' && url.pathname === '/api/leave') {
+        const user = auth(req);
+        if (user.admin) throw fail(403, 'Отключение предназначено для второго устройства.');
+        connectedDevices.delete(user.key);
+        if (!user.trustedFingerprint) sessions.delete(user.key);
+        json(res, 200, { ok: true }); return;
+      }
       if (req.method === 'GET' && url.pathname === '/api/state') {
         const user = auth(req);
         await recordConnection(req, user, url);
+        if (!user.admin) connectedDevices.set(user.key, { id: connectedDevices.get(user.key)?.id || randomUUID(), name: user.device, secure: !!user.trustedFingerprint, fingerprint: user.trustedFingerprint, lastSeen: Date.now() });
         json(res, 200, {
           admin: user.admin,
+          connectedDevices: user.admin ? [...connectedDevices.values()].map(({ name, secure }) => ({ name, secure })) : undefined,
           peerConnection: user.admin ? peer.connection : undefined,
           pin: user.admin ? pin : undefined,
           urls: user.admin ? addresses.map(ip => `http://${ip}:${boundPort}`) : undefined,
           receivedDirectory: user.admin ? inbox : undefined,
           offers: [...offers.values()].filter(x => user.admin || x.owner === user.key).map(publicOffer),
-          shares: [...shares.values()].map(publicShare),
+          shares: [...shares.values()].filter(share => user.admin || !share.recipient || share.recipient === user.key).map(publicShare),
           maxSize,
         });
         return;
@@ -376,9 +408,17 @@ export async function createApp({
       if (req.method === 'POST' && url.pathname === '/api/shares') {
         auth(req, true);
         if (shares.size >= maxRecords) throw fail(429, 'Удалите ненужные файлы из списка раздачи.');
+        const recipientId = url.searchParams.get('recipient');
+        const recipient = recipientId === null ? undefined : [...connectedDevices].find(([, device]) => device.id === recipientId)?.[0];
+        if (recipientId !== null && !recipient) throw fail(409, 'Устройство отключилось. Выберите получателя ещё раз.');
         const spec = fileSpec({ name: url.searchParams.get('name'), size: Number(url.searchParams.get('size')) }, maxSize);
         const filePath = await receive(req, spec, outbox);
-        const share = { ...spec, id: randomUUID(), path: filePath };
+        prune();
+        if (recipientId !== null && connectedDevices.get(recipient)?.id !== recipientId) {
+          await rm(filePath, { force: true });
+          throw fail(409, 'Устройство отключилось. Файл не опубликован; подключитесь и повторите отправку.');
+        }
+        const share = { ...spec, id: randomUUID(), path: filePath, recipient, recipientName: recipient ? connectedDevices.get(recipient).name : undefined };
         shares.set(share.id, share);
         json(res, 201, publicShare(share));
         return;
@@ -389,6 +429,7 @@ export async function createApp({
         if (!share) throw fail(404, 'Файл больше не доступен.');
         if (req.method === 'POST' && shareRoute[2] === 'ticket') {
           const user = auth(req);
+          if (share.recipient && !user.admin && share.recipient !== user.key) throw fail(403, 'Этот файл предназначен другому устройству.');
           if (tickets.size >= 1000) throw fail(429, 'Слишком много скачиваний. Повторите позже.');
           const key = token();
           tickets.set(key, { share: share.id, expires: Date.now() + ttl, countTransfer: !user.admin, trustedFingerprint: user.trustedFingerprint });

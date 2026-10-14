@@ -162,7 +162,7 @@ function render() {
   if (state.admin && !pending.length) empty($('incoming'), 'Пока нет запросов. Отправьте файл со второго устройства.');
   if (!state.admin && !state.shares.length) empty($('shared'), 'Здесь появятся файлы, которыми поделится компьютер.');
   for (const share of state.shares) {
-    const item = row(share.name, `${sizes(share.size)} · ${state.admin ? 'Доступен подключённым устройствам' : 'Готов к скачиванию'}`);
+    const item = row(share.name, `${sizes(share.size)} · ${state.admin ? (share.recipientName ? `Только для «${share.recipientName}»` : 'Доступен подключённым устройствам') : 'Готов к скачиванию'}`);
     item.element.append(button('Скачать', async () => {
       const ticket = await api(`/api/shares/${share.id}/ticket`, { method: 'POST' });
       const link = document.createElement('a'); link.href = ticket.url; link.download = share.name;
