@@ -27,17 +27,25 @@ try {
       const choose=page.locator('.hero-actions a[href="#download"]');await choose.click();
       assert.equal(new URL(page.url()).hash,'#download');
       const choices=page.locator('#download .windows-download-choices');await choices.waitFor();
-      assert.equal(await choices.locator('[data-installer]').count(),2);
+      const select=choices.locator('select');await page.waitForFunction(()=>!document.getElementById('windows-build-select').disabled);
+      assert.equal(await select.inputValue(),'windows','Windows 10/11 is the default');
+      assert.deepEqual(await select.locator('option').allTextContents(),['Windows 10/11','Windows Server 2016']);
+      assert.equal(await choices.locator('[data-installer]').count(),1,'A single download button');
       for(const [id,metadata,title,framework] of [['windows',desktop,'Windows 10/11','4.8'],['server2016',serverBuild,'Windows Server 2016','4.6.2']]) {
+        await select.selectOption(id);
         const link=choices.locator(`[data-installer="${id}"]`), card=link.locator('..');
         assert.equal(await link.evaluate(a=>new URL(a.href).pathname),'/downloads/'+metadata.installer);
         assert.ok(await link.getAttribute('download')!==null);
-        assert.equal(await card.locator('h4').textContent(),title);
+        assert.ok((await link.getAttribute('aria-label')).includes(title));
         assert.ok((await card.textContent()).includes('.NET Framework '+framework));
         if(id==='server2016')assert.ok((await card.textContent()).includes('Desktop Experience'));
         const box=await link.boundingBox();assert.ok(box.height>=44);assert.ok(box.x>=0 && box.x+box.width<=width);
         if(locale==='ru'&&width===1280){const downloadEvent=page.waitForEvent('download');await link.click();const download=await downloadEvent;assert.equal(download.suggestedFilename(),metadata.installer);await download.cancel();}
+        assert.ok((await choices.boundingBox()).height<340,'Compact single selector');
       }
+      if(locale==='ru'&&width===1280){await page.reload();await page.waitForFunction(()=>!document.getElementById('windows-build-select').disabled);assert.equal(await select.inputValue(),'windows','A new visit defaults to Windows 10/11');}
+      await select.selectOption('windows');
+      assert.equal(await choices.locator('[data-installer="windows"]').evaluate(a=>new URL(a.href).pathname),'/downloads/'+desktop.installer,'Switching back restores the desktop installer');
       assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`${locale} ${width}`);
       if(locale==='ru'||locale==='en')await choices.screenshot({path:`artifacts/nearby-download-choice-${publicOrigin?'public':'local'}-${locale}-${width}.png`});
       results.push({locale,width,desktop:desktop.installer,server:serverBuild.installer});
@@ -45,6 +53,6 @@ try {
     await context.close();
   }
   assert.deepEqual(errors,[]);
-  await writeFile(`artifacts/Nearby-download-choice-${publicOrigin?'public':'local'}-verification.json`,JSON.stringify({passed:true,origin,pages:results,version:desktop.version,desktopAndServerChoices:true,heroOpensChoice:true,bothDownloadCommandsVerified:true,statisticsUnchangedByTest:true,checkedAt:new Date().toISOString()},null,2));
-  console.log('Windows download selection passed: five languages, desktop/mobile, explicit requirements and correct installer downloads.');
+  await writeFile(`artifacts/Nearby-download-dropdown-${publicOrigin?'public':'local'}-verification.json`,JSON.stringify({passed:true,origin,pages:results,version:desktop.version,singleDropdown:true,defaultWindows1011:true,singleDownloadButton:true,compactLayout:true,desktopAndServerChoices:true,heroOpensChoice:true,bothDownloadCommandsVerified:true,statisticsUnchangedByTest:true,checkedAt:new Date().toISOString()},null,2));
+  console.log('Compact Windows dropdown passed: default Windows 10/11, both downloads and switch-back, five languages and desktop/mobile layouts.');
 } finally {await browser?.close();if(server){server.kill();await exited;}}
