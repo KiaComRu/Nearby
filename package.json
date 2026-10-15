@@ -18,6 +18,7 @@
     "test:usage": "node scripts/usage-e2e.mjs",
     "test:shell": "node scripts/shell-e2e.mjs",
     "test:shell:native": "node scripts/shell-native-smoke.mjs",
+    "test:downloads": "node scripts/download-choice-e2e.mjs",
     "build:icons": "node scripts/generate-favicons.mjs",
     "test:web": "node --test test/browser-*.test.mjs",
     "test:browser": "node scripts/browser-e2e.mjs",
