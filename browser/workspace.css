@@ -136,3 +136,5 @@ body.compact-app{height:100vh;height:100dvh;min-height:0;display:flex;flex-direc
 
 .web-app #connection-settings{align-self:center;min-width:0;font-size:12px}.web-app #connection-settings summary{cursor:pointer;color:var(--muted)}.web-app #connection-settings[open]{align-self:start}.web-app #connection-settings select{width:100%;max-width:100%}
 .web-app .invitation-confirmation{display:flex;align-items:flex-start;gap:8px;line-height:1.4;margin-top:10px}.web-app #confirm-invitation{width:16px;height:16px;min-height:0;flex:0 0 16px;padding:0;margin:1px 0 0;accent-color:var(--cyan)}
+
+.web-app[data-active-pane="transfer"] #transfer-statistics{display:none}
