@@ -39,7 +39,7 @@ try {
   const bytes = randomBytes(66001); await second.locator('#files').setInputFiles({ name: 'to-owner.bin', mimeType: 'application/octet-stream', buffer: bytes });
   const received = owner.locator('#incoming .file-row').filter({ hasText: 'to-owner.bin' }); await received.getByText('Получено и сохранено', { exact: true }).waitFor({ state: 'attached' });
   const saved = (await readdir(firstApp.inbox)).find(name => name.endsWith('-to-owner.bin')); assert.equal(digest(await readFile(path.join(firstApp.inbox, saved))), digest(bytes));
-  assert.equal(await received.locator('td').count(), 5); assert.ok(Date.parse(await received.locator('time').getAttribute('datetime')) > 0);
+  assert.equal(await received.locator('td').count(), 4); assert.ok(Date.parse(await received.locator('time').getAttribute('datetime')) > 0);
   const cells = await received.locator('td').evaluateAll(nodes => nodes.map(n => ({ x: n.getBoundingClientRect().x, y: n.getBoundingClientRect().y }))); assert.ok(cells.every(c => c.y === cells[0].y));
   await received.getByRole('button', { name: 'Открыть', exact: true }).click(); assert.equal(opened.at(-1), path.join(firstApp.inbox, saved));
   await received.getByRole('button', { name: 'Удалить из списка' }).click(); await owner.waitForTimeout(1800); assert.equal(await received.count(), 0); assert.equal(digest(await readFile(path.join(firstApp.inbox, saved))), digest(bytes));

@@ -47,7 +47,7 @@ try {
     const download = await downloading; assert.equal(download.suggestedFilename(), name);
     assert.equal(hash(await readFile(await download.path())), hash(bytes));
     count++; size += bytes.length;
-    assert.equal(await card.locator('td').count(), 5);
+    assert.equal(await card.locator('td').count(), 4);
     const cells = await card.locator('td').evaluateAll(nodes => nodes.map(n => ({ x: n.getBoundingClientRect().x, y: n.getBoundingClientRect().y })));
     assert.ok(cells.every(c => Math.abs(c.y - cells[0].y) < 1), 'all cells belong to the same table row'); assert.ok(cells.every((c, i) => !i || c.x > cells[i-1].x));
     const started = Date.parse(await card.locator('time').getAttribute('datetime')); assert.ok(Math.abs(Date.now() - started) < 60000);

@@ -1,16 +1,19 @@
-.web-app .transfer-table th:nth-child(1),.native-app .transfer-table th:nth-child(1){width:44%}
-.web-app .transfer-table th:nth-child(2),.native-app .transfer-table th:nth-child(2){width:11%}
-.web-app .transfer-table th:nth-child(3),.native-app .transfer-table th:nth-child(3){width:20%}
-.web-app .transfer-table th:nth-child(4),.native-app .transfer-table th:nth-child(4){width:10%}
-.web-app .transfer-table th:nth-child(5),.native-app .transfer-table th:nth-child(5){width:15%}
+.web-app .transfer-table,.native-app .transfer-table{min-width:520px}
+.web-app .transfer-table th:nth-child(1),.native-app .transfer-table th:nth-child(1){width:40%}
+.web-app .transfer-table th:nth-child(2),.native-app .transfer-table th:nth-child(2){width:13%}
+.web-app .transfer-table th:nth-child(3),.native-app .transfer-table th:nth-child(3){width:24%}
+.web-app .transfer-table th:nth-child(4),.native-app .transfer-table th:nth-child(4){width:23%}
 .transfer-file{display:flex;align-items:center;gap:10px;min-width:0}
 .transfer-file-info{min-width:0;flex:1}
 .file-preview{display:flex;align-items:center;justify-content:center;flex:0 0 40px;width:40px;height:44px;border:1px solid var(--cyan,#77e8ff);border-radius:7px;background:color-mix(in srgb,var(--cyan,#77e8ff) 9%,transparent);color:var(--cyan,#77e8ff);overflow:hidden;font-size:9px;font-weight:700;line-height:1;letter-spacing:0}
 .file-preview img{display:block;max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain}
-.transfer-status{text-align:center}
-.transfer-status-button{display:inline-flex!important;align-items:center;justify-content:center;width:32px;min-width:32px;height:32px;padding:5px!important;border:1px solid transparent!important;border-radius:50%!important;background:transparent!important;color:var(--cyan,#77e8ff)!important;cursor:pointer}
-.transfer-status-button svg{display:block;width:20px;height:20px;pointer-events:none}
-.transfer-status-button:hover,.transfer-status-button:focus-visible,.transfer-status-button[aria-expanded=true]{border-color:currentColor!important;outline:none;background:color-mix(in srgb,var(--cyan,#77e8ff) 12%,transparent)!important}
+.transfer-commands,.transfer-file-actions{display:flex;align-items:center;gap:4px;white-space:nowrap}
+.transfer-commands{justify-content:flex-end}
+.web-app .transfer-table .transfer-icon,.native-app .transfer-table .transfer-icon{display:inline-flex!important;align-items:center;justify-content:center;flex:0 0 32px;width:32px;min-width:32px;height:32px;min-height:32px;margin:0!important;padding:5px!important;border:1px solid transparent!important;border-radius:6px!important;background:transparent!important;color:var(--cyan,#77e8ff)!important;text-decoration:none!important;cursor:pointer;line-height:1}
+.transfer-icon svg{display:block;width:20px;height:20px;pointer-events:none}
+.web-app .transfer-table .transfer-icon:not(:disabled):hover,.native-app .transfer-table .transfer-icon:not(:disabled):hover,.transfer-icon:focus-visible,.transfer-icon[aria-expanded=true]{border-color:currentColor!important;outline:none;background:color-mix(in srgb,var(--cyan,#77e8ff) 12%,transparent)!important}
+.transfer-icon:disabled{opacity:.35;cursor:default!important}
+.transfer-commands .transfer-icon{transform:none!important}
 .transfer-status .transfer-detail[hidden]{display:none!important}
 .transfer-actions button[hidden]{display:none!important}
 .transfer-status-tooltip{position:fixed;z-index:10000;box-sizing:border-box;width:max-content;max-width:min(300px,calc(100vw - 24px));padding:10px 13px;border:1px solid #6f91ac;border-radius:9px;background:#142338;color:#eef6ff;box-shadow:0 6px 24px #0005;font:13px/1.45 system-ui,sans-serif;overflow-wrap:anywhere;pointer-events:none}

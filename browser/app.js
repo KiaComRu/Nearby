@@ -173,7 +173,7 @@ function register(session, peerName = '') {
     onOffer: (connection, spec, receivingLink) => { void showIncoming(connection, spec, receivingLink); },
     onProgress: (connection, id, bytes, direction) => { const row = rows.get(rowKey(connection, id)); if (row) { row.progress.value = bytes; row.detail.textContent = `${direction === 'sending' ? 'Отправляем' : 'Принимаем'}: ${sizes(bytes)} / ${sizes(row.size)}`; } },
     onComplete: complete,
-    onError: (connection, id, message) => { const row = rows.get(rowKey(connection, id)); if (row) { row.element.classList.add('error'); row.detail.textContent = message; row.done = true; row.sourceFile = null; row.actions.replaceChildren(); row.progress.remove(); deleteButton(row); } },
+    onError: (connection, id, message) => { const row = rows.get(rowKey(connection, id)); if (row) { row.element.classList.add('error'); row.detail.textContent = message; row.done = true; row.sourceFile = null; resetActions(row); row.progress.remove(); deleteButton(row); } },
     onClosed: (connection, message, expected) => {
       if (appClosed) return;
       if (selectedId === connection.id) { selectedId = null; selectionLost = true; }
@@ -236,14 +236,19 @@ function rowFor(connection, spec, direction) {
   date.className = 'transfer-date'; time.dateTime = createdAt.toISOString(); time.textContent = new Intl.DateTimeFormat(document.documentElement.lang || 'ru', { dateStyle: 'short', timeStyle: 'medium' }).format(createdAt); date.append(time);
   const detail = document.createElement('div'); detail.className = 'transfer-detail'; detail.textContent = direction === 'incoming' ? 'Принимаем автоматически…' : 'Подготавливаем передачу…';
   const progress = document.createElement('progress'); progress.max = spec.size || 1; progress.value = 0; progress.setAttribute('aria-label', 'Прогресс передачи');
-  const actions = document.createElement('td'); actions.className = 'transfer-actions';
   const peerName = document.createElement('div'); peerName.className = 'transfer-peer'; peerName.textContent = displayName(connection);
   const preview = window.NearbyFilePresentation.preview(spec.name);
   const name = document.createElement('td'), file = document.createElement('div'), info = document.createElement('div');
   file.className = 'transfer-file'; info.className = 'transfer-file-info'; info.append(title, peerName, progress); file.append(preview.element, info); name.append(file);
   const state = window.NearbyFilePresentation.status(detail);
-  element.append(name, size, date, state, actions); $(direction === 'incoming' ? 'transfers' : 'outgoing-transfers').prepend(element);
-  const row = { element, detail, progress, actions, preview, id: spec.id, name: spec.name, size: spec.size, done: false, direction, connection }; rows.set(rowKey(connection, spec.id), row); return row;
+  const actions = state.querySelector('.transfer-file-actions');
+  element.append(name, size, date, state); $(direction === 'incoming' ? 'transfers' : 'outgoing-transfers').prepend(element);
+  const row = { element, detail, progress, actions, preview, id: spec.id, name: spec.name, size: spec.size, done: false, direction, connection }; resetActions(row); rows.set(rowKey(connection, spec.id), row); return row;
+}
+function resetActions(row) {
+  row.openControl = window.NearbyFilePresentation.icon(document.createElement('button'), 'open', 'Открыть');
+  row.openControl.type = 'button'; row.openControl.disabled = true; row.openControl.classList.add('open-transfer');
+  row.actions.replaceChildren(row.openControl);
 }
 function deleteButton(row) {
   const remove = button('×', () => {
@@ -253,7 +258,7 @@ function deleteButton(row) {
     row.element.remove(); rows.delete(rowKey(row.connection, row.id));
     $('empty').hidden = $('transfers').children.length > 0;
   });
-  remove.classList.add('remove-transfer'); remove.setAttribute('aria-label', 'Удалить из списка'); remove.title = 'Удалить из списка'; row.actions.append(remove);
+  remove.classList.add('remove-transfer'); window.NearbyFilePresentation.icon(remove, 'close', 'Удалить из списка'); row.actions.append(remove);
 }
 function fileActions(row, blob) {
   if (!rows.has(rowKey(row.connection, row.id))) return;
@@ -263,12 +268,12 @@ function fileActions(row, blob) {
   const types = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif', bmp: 'image/bmp', pdf: 'application/pdf', txt: 'text/plain', csv: 'text/plain', json: 'text/plain', mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', mp4: 'video/mp4', webm: 'video/webm' };
   const type = types[row.name.split('.').at(-1).toLowerCase()] || 'application/octet-stream';
   row.url = URL.createObjectURL(blob.slice(0, blob.size, type)); objectUrls.add(row.url);
-  const open = document.createElement('a'); open.className = 'open-transfer'; open.href = row.url; open.textContent = 'Открыть'; open.target = '_blank'; open.rel = 'noopener noreferrer';
+  const open = document.createElement('a'); open.className = 'open-transfer'; open.href = row.url; window.NearbyFilePresentation.icon(open, 'open', 'Открыть'); open.target = '_blank'; open.rel = 'noopener noreferrer';
   if (type === 'application/octet-stream') open.download = row.name;
-  row.actions.prepend(open);
+  row.openControl.replaceWith(open); row.openControl = open;
 }
 function button(label, action, primary = false) { const b = document.createElement('button'); b.className = `button ${primary ? 'primary' : 'secondary'}`; b.textContent = label; b.onclick = action; return b; }
-function cancelButton(fileLink, id, actions) { actions.append(button('Отменить', () => fileLink.cancel(id))); }
+function cancelButton(fileLink, id, actions) { const cancel = button('', () => fileLink.cancel(id)); cancel.classList.add('cancel-transfer'); actions.append(window.NearbyFilePresentation.icon(cancel, 'close', 'Отменить')); }
 function memorySink(spec, row) {
   if (spec.size > MEMORY_LIMIT) throw new Error('Для обычного скачивания доступны файлы до 100 МиБ. Для больших файлов используйте Chrome/Edge на ПК с разрешённой записью на диск.');
   if (bufferedBytes + spec.size > MEMORY_LIMIT) throw new Error('Сначала сохраните принятые файлы и удалите их из списка. Вкладка хранит не более 100 МиБ.');
@@ -308,7 +313,7 @@ for (const control of document.querySelectorAll('[data-choose-folder]')) {
 }
 function complete(connection, id, direction, blob) {
   const row = rows.get(rowKey(connection, id)); if (!row || row.done) return;
-  row.done = true; row.progress.remove(); row.actions.replaceChildren(); deleteButton(row);
+  row.done = true; row.progress.remove(); resetActions(row); deleteButton(row);
   row.detail.textContent = direction === 'sent' ? 'Передан получателю.' : blob ? 'Файл принят. Загрузка началась автоматически.' : 'Сохранён в выбранную папку.';
   if (direction === 'received') void connection.reportStatistics('record-transfer', { id, size: row.size });
   if (blob) {

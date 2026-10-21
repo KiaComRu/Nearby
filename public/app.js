@@ -297,15 +297,15 @@ function renderTransfers() {
       const size = document.createElement('td'); size.className = 'transfer-size'; size.textContent = sizes(record.size);
       const date = document.createElement('td'), time = document.createElement('time'); time.dateTime = new Date(record.created).toISOString(); time.textContent = new Intl.DateTimeFormat('ru', { dateStyle: 'short', timeStyle: 'medium' }).format(record.created); date.append(time);
       const detail = document.createElement('div'); detail.className = 'file-meta transfer-detail'; const status = window.NearbyFilePresentation.status(detail);
-      const actions = document.createElement('td'); actions.className = 'transfer-actions';
-      const open = button('Открыть', () => openRecord(record), true); actions.append(open);
+      const actions = status.querySelector('.transfer-file-actions');
+      const open = window.NearbyFilePresentation.icon(button('', () => openRecord(record), true), 'open', 'Открыть'); open.classList.add('open-transfer'); actions.append(open);
       const remove = button('×', () => {
         hiddenRecords.add(record.key);
         if (record.serverId) { hiddenRecords.add(`${record.serverKind}:${record.serverId}`); if (record.target) { hiddenRecords.add(`peer-offer:${record.target.id}:${record.serverId}`); hiddenRecords.add(`peer-share:${record.target.id}:${record.serverId}`); } }
         try { sessionStorage.setItem('nearby-hidden-records', JSON.stringify([...hiddenRecords].slice(-2000))); } catch {}
         if (record.url) URL.revokeObjectURL(record.url); record.preview?.dispose(); window.NearbyFilePresentation.closeStatus(); record.file = null; records.delete(record.key); rendered = ''; renderTransfers();
-      }, true); remove.classList.add('remove-transfer'); remove.setAttribute('aria-label', 'Удалить из списка'); remove.title = 'Удалить из списка'; actions.append(remove);
-      element.append(name, size, date, status, actions);
+      }, true); remove.classList.add('remove-transfer'); window.NearbyFilePresentation.icon(remove, 'close', 'Удалить из списка'); actions.append(remove);
+      element.append(name, size, date, status);
       $(record.direction === 'outgoing' ? 'queue' : record.target || !state.admin ? 'shared' : 'incoming').prepend(element);
       record.ui = { element, info, detail, device, open, remove };
     }
@@ -318,7 +318,7 @@ function renderTransfers() {
       if (!progress) { progress = document.createElement('progress'); progress.setAttribute('aria-label', 'Прогресс передачи'); ui.info.append(progress); }
       progress.max = record.size || 1; progress.value = record.received || 0;
     } else progress?.remove();
-    ui.open.hidden = Boolean(record.busy || (record.failed && record.serverKind !== 'share') || !(record.localStored || record.file || record.serverKind === 'share'));
+    ui.open.disabled = Boolean(record.busy || (record.failed && record.serverKind !== 'share') || !(record.localStored || record.file || record.serverKind === 'share'));
     ui.remove.disabled = Boolean(record.busy);
   }
 }

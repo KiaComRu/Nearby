@@ -266,7 +266,7 @@
   }
   function updateElement(element) {
     if (element.closest?.(protectedSelector) && !element.matches('input')) return;
-    for (const attr of ['placeholder','aria-label','alt']) if (element.hasAttribute?.(attr)) {
+    for (const attr of ['placeholder','aria-label','alt','title']) if (element.hasAttribute?.(attr)) {
       const name = '@' + attr, record = records.get(element) || {}, current = element.getAttribute(attr), saved = record[name];
       const source = saved && saved.output === current ? saved.source : current;
       const output = translate(source); record[name] = { source, output }; records.set(element, record);
@@ -304,5 +304,5 @@
       else for (const node of change.addedNodes) walk(node);
     }
   });
-  apply(); observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['placeholder','aria-label','alt'] });
+  apply(); observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['placeholder','aria-label','alt','title'] });
 })();

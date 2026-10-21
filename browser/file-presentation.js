@@ -51,8 +51,8 @@
     active = { button, observer, pinned }; button.setAttribute('aria-expanded', 'true'); update();
   }
   function status(detail) {
-    const cell = document.createElement('td'), button = document.createElement('button'); cell.className = 'transfer-status';
-    button.type = 'button'; button.className = 'transfer-status-button'; button.setAttribute('aria-label', 'Статус передачи'); button.setAttribute('aria-expanded', 'false');
+    const cell = document.createElement('td'), button = document.createElement('button'); cell.className = 'transfer-status transfer-actions';
+    button.type = 'button'; button.className = 'transfer-status-button transfer-icon'; button.setAttribute('aria-label', 'Статус передачи'); button.setAttribute('aria-expanded', 'false');
     detail.hidden = true; detail.id = `transfer-status-${++sequence}`; button.setAttribute('aria-describedby', detail.id);
     button.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 10.5v6M12 7v.5"/></svg>';
     button.addEventListener('pointerenter', event => { if (event.pointerType !== 'touch') showStatus(button, detail); });
@@ -60,12 +60,23 @@
     button.addEventListener('focus', () => showStatus(button, detail));
     button.addEventListener('blur', () => { if (active?.button === button) closeStatus(); });
     button.addEventListener('click', () => { if (active?.button === button && active.pinned) closeStatus(); else showStatus(button, detail, true); });
-    cell.append(button, detail); return cell;
+    const group = document.createElement('div'), controls = document.createElement('span');
+    group.className = 'transfer-commands'; controls.className = 'transfer-file-actions';
+    group.append(button, detail, controls); cell.append(group); return cell;
+  }
+  function icon(control, action, label) {
+    const paths = {
+      open: '<path d="M14 3h7v7M21 3L10 14"/><path d="M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5"/>',
+      close: '<path d="m6 6 12 12M18 6 6 18"/>'
+    };
+    control.classList.add('transfer-icon'); control.setAttribute('aria-label', label); control.title = label;
+    control.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[action]}</svg>`;
+    return control;
   }
   document.addEventListener('pointerdown', event => { if (active && !active.button.contains(event.target) && !tooltip.contains(event.target)) closeStatus(); });
   document.addEventListener('keydown', event => { if (event.key === 'Escape') closeStatus(); });
   window.addEventListener('resize', () => { if (active) positionStatus(); });
   document.addEventListener('scroll', () => { if (active) positionStatus(); }, true);
   window.addEventListener('pagehide', closeStatus);
-  window.NearbyFilePresentation = Object.freeze({ preview, status, closeStatus, rasterTypes, maxPreviewBytes });
+  window.NearbyFilePresentation = Object.freeze({ preview, status, icon, closeStatus, rasterTypes, maxPreviewBytes });
 })();
