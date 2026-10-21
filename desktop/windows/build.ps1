@@ -5,6 +5,7 @@ $taskTools = Join-Path $taskRoot '.build-tools'
 $taskPlatform = if ($Target -eq 'Server2016') { 'windows-server-2016-x64' } else { 'windows-x64' }
 $taskStage = Join-Path $taskRoot "dist\$taskPlatform"
 $taskArtifacts = Join-Path $taskRoot 'artifacts'
+$taskVersion = (Get-Content -LiteralPath (Join-Path $taskRoot 'package.json') -Raw | ConvertFrom-Json).version
 $taskCompiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $taskWebVersion = '1.0.4258.31'
 $taskWebRoot = Join-Path $taskTools "webview2-$taskWebVersion"
@@ -17,6 +18,15 @@ if ([int]($taskNodeVersion.TrimStart('v').Split('.')[0]) -lt 22) { throw 'Нуж
 if ($Target -eq 'Server2016' -and [int]($taskNodeVersion.TrimStart('v').Split('.')[0]) -ne 24) { throw 'Для проверенного профиля Server 2016 нужен Node.js 24 x64.' }
 if (-not [Environment]::Is64BitProcess) { throw 'Запустите сборку из 64-разрядного PowerShell.' }
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+# Always package a fresh payload; native test helpers and stale files must never ship.
+$taskStageFull = [IO.Path]::GetFullPath($taskStage)
+$taskDistFull = [IO.Path]::GetFullPath((Join-Path $taskRoot 'dist')) + [IO.Path]::DirectorySeparatorChar
+if (-not $taskStageFull.StartsWith($taskDistFull, [StringComparison]::OrdinalIgnoreCase)) { throw 'Каталог сборки находится вне dist.' }
+if (Test-Path -LiteralPath $taskStageFull) {
+    if ((Resolve-Path -LiteralPath $taskStageFull).Path -ne $taskStageFull) { throw 'Некорректный путь каталога сборки.' }
+    if (((Get-Item -LiteralPath $taskStageFull -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -or (Get-ChildItem -LiteralPath $taskStageFull -Force -Recurse -Attributes ReparsePoint | Select-Object -First 1)) { throw 'Каталог сборки содержит ссылку; очистка отменена.' }
+    Remove-Item -LiteralPath $taskStageFull -Recurse -Force
+}
 New-Item -ItemType Directory -Force -Path $taskTools,$taskStage,$taskArtifacts | Out-Null
 
 if (-not (Test-Path -LiteralPath (Join-Path $taskWebRoot 'lib\net462\Microsoft.Web.WebView2.Core.dll'))) {
@@ -91,17 +101,18 @@ $taskExe = Join-Path $taskStage 'Nearby.exe'
 $taskCompilerArgs = @('/nologo', '/target:winexe', '/platform:x64', '/optimize+', "/out:$taskExe", "/win32icon:$(Join-Path $taskStage 'Nearby.ico')")
 if ($Target -eq 'Server2016') {
     $taskCompilerArgs += @('/noconfig', '/nostdlib+', '/define:SERVER2016')
-    foreach ($taskReference in @('mscorlib.dll', 'System.dll', 'System.Core.dll', 'System.Drawing.dll', 'System.Windows.Forms.dll', 'System.Web.Extensions.dll')) {
+    foreach ($taskReference in @('mscorlib.dll', 'System.dll', 'System.Core.dll', 'System.Drawing.dll', 'System.Windows.Forms.dll', 'System.Web.Extensions.dll', 'System.Net.Http.dll')) {
         $taskCompilerArgs += "/reference:$(Join-Path $taskReferences $taskReference)"
     }
 } else {
-    $taskCompilerArgs += @('/reference:System.dll', '/reference:System.Core.dll', '/reference:System.Drawing.dll', '/reference:System.Windows.Forms.dll', '/reference:System.Web.Extensions.dll')
+    $taskCompilerArgs += @('/reference:System.dll', '/reference:System.Core.dll', '/reference:System.Drawing.dll', '/reference:System.Windows.Forms.dll', '/reference:System.Web.Extensions.dll', '/reference:System.Net.Http.dll')
 }
-$taskCompilerArgs += @("/reference:$(Join-Path $taskStage 'Microsoft.Web.WebView2.Core.dll')", "/reference:$(Join-Path $taskStage 'Microsoft.Web.WebView2.WinForms.dll')", (Join-Path $PSScriptRoot 'Launcher.cs'), (Join-Path $PSScriptRoot 'ShellIntegration.cs'))
+$taskCompilerArgs += @("/reference:$(Join-Path $taskStage 'Microsoft.Web.WebView2.Core.dll')", "/reference:$(Join-Path $taskStage 'Microsoft.Web.WebView2.WinForms.dll')", (Join-Path $PSScriptRoot 'Launcher.cs'), (Join-Path $PSScriptRoot 'ShellIntegration.cs'), (Join-Path $PSScriptRoot 'DesktopUpdates.cs'))
 & $taskCompiler @taskCompilerArgs
 if ($LASTEXITCODE -ne 0) { throw 'Ошибка компиляции Windows-приложения.' }
-$taskSetup = Join-Path $taskArtifacts "Nearby-0.5.2-$taskPlatform-setup.exe"
-$taskInstallerArgs = @('/V2', "/DPAYLOAD=$taskStage", "/DOUTPUT=$taskSetup")
+if ([Diagnostics.FileVersionInfo]::GetVersionInfo($taskExe).FileVersion -ne "$taskVersion.0") { throw 'Версия Launcher.cs не совпадает с package.json.' }
+$taskSetup = Join-Path $taskArtifacts "Nearby-$taskVersion-$taskPlatform-setup.exe"
+$taskInstallerArgs = @('/V2', "/DVERSION=$taskVersion", "/DPAYLOAD=$taskStage", "/DOUTPUT=$taskSetup")
 if ($Target -eq 'Server2016') { $taskInstallerArgs += '/DSERVER2016' }
 $taskInstallerArgs += (Join-Path $PSScriptRoot 'installer.nsi')
 & $taskMakensis @taskInstallerArgs
@@ -111,10 +122,11 @@ $taskSetupStream = [IO.File]::OpenRead($taskSetup)
 try { $taskSetupHash = [BitConverter]::ToString($taskSetupHasher.ComputeHash($taskSetupStream)).Replace('-','').ToLowerInvariant() }
 finally { $taskSetupStream.Dispose(); $taskSetupHasher.Dispose() }
 $taskManifest = [ordered]@{
-    product = 'Nearby'; version = '0.5.2'; platform = $taskPlatform; node = $taskNodeVersion
+    product = 'Nearby'; version = $taskVersion; platform = $taskPlatform; node = $taskNodeVersion
     webView2Sdk = $taskWebVersion; builtAt = [DateTime]::UtcNow.ToString('o')
     installer = [IO.Path]::GetFileName($taskSetup)
     sha256 = $taskSetupHash
+    size = (Get-Item -LiteralPath $taskSetup).Length
     signed = $false
 }
 $taskManifestName = 'windows-build.json'

@@ -2,6 +2,11 @@
 !include "MUI2.nsh"
 !include "WinVer.nsh"
 !include "x64.nsh"
+!include "FileFunc.nsh"
+!ifndef VERSION
+  !define VERSION "0.5.7"
+!endif
+Var UpdatePID
 !ifndef PAYLOAD
   !error "PAYLOAD must point to the staged application directory"
 !endif
@@ -17,11 +22,11 @@ OutFile "${OUTPUT}"
 InstallDir "$LOCALAPPDATA\Programs\Nearby"
 RequestExecutionLevel user
 SetCompressor /SOLID zlib
-VIProductVersion "0.5.2.0"
+VIProductVersion "${VERSION}.0"
 VIAddVersionKey "ProductName" "Nearby"
 VIAddVersionKey "FileDescription" "Nearby — локальная передача файлов"
-VIAddVersionKey "FileVersion" "0.5.2"
-VIAddVersionKey "ProductVersion" "0.5.2"
+VIAddVersionKey "FileVersion" "${VERSION}"
+VIAddVersionKey "ProductVersion" "${VERSION}"
 VIAddVersionKey "LegalCopyright" ""
 !define MUI_ICON "${PAYLOAD}\Nearby.ico"
 !define MUI_UNICON "${PAYLOAD}\Nearby.ico"
@@ -37,6 +42,23 @@ VIAddVersionKey "LegalCopyright" ""
 
 Function .onInit
   SetShellVarContext current
+  ${GetParameters} $R0
+  ClearErrors
+  ${GetOptions} $R0 "/UPDATEPID=" $UpdatePID
+  IfErrors no_update_wait
+  IntCmpU $UpdatePID 0 bad_update_pid bad_update_pid wait_update_pid
+  bad_update_pid:
+    Abort
+  wait_update_pid:
+    ; Wait for the requesting process; never terminate an active user instance.
+    System::Call 'kernel32::OpenProcess(i 0x00100000, i 0, i $UpdatePID) p .r1'
+    StrCmp $1 0 no_update_wait
+    System::Call 'kernel32::WaitForSingleObject(p r1, i 30000) i .r2'
+    System::Call 'kernel32::CloseHandle(p r1)'
+    StrCmp $2 0 no_update_wait
+    MessageBox MB_OK|MB_ICONSTOP "Nearby не успел закрыться. Повторите обновление после завершения передач."
+    Abort
+  no_update_wait:
   ${IfNot} ${RunningX64}
     MessageBox MB_OK|MB_ICONSTOP "Эта сборка Nearby предназначена для 64-разрядной Windows (x64)."
     Abort
@@ -66,16 +88,19 @@ Function .onInit
     Abort
   ${EndIf}
 !endif
+!ifndef UPDATE_TEST
   FindWindow $0 "" "Nearby"
   StrCmp $0 0 ready
   MessageBox MB_OK|MB_ICONINFORMATION "Закройте окно Nearby перед установкой обновления."
   Abort
   ready:
+!endif
 FunctionEnd
 
 Section "Nearby"
   SetOutPath "$INSTDIR"
-  File /r "${PAYLOAD}\*"
+  File /r /x "*Harness.exe" /x "*Harness.exe.config" "${PAYLOAD}\*"
+!ifndef UPDATE_TEST
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   CreateDirectory "$SMPROGRAMS\Nearby"
   CreateShortcut "$SMPROGRAMS\Nearby\Nearby.lnk" "$INSTDIR\Nearby.exe"
@@ -89,12 +114,19 @@ Section "Nearby"
   SetRegView 32
   CreateShortcut "$SENDTO\Nearby.lnk" "$INSTDIR\Nearby.exe" "--send"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Nearby" "DisplayName" "Nearby"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Nearby" "DisplayVersion" "0.5.2"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Nearby" "DisplayVersion" "${VERSION}"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Nearby" "UninstallString" '$\"$INSTDIR\Uninstall.exe$\"'
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Nearby" "DisplayIcon" "$INSTDIR\Nearby.exe"
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Nearby" "NoModify" 1
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Nearby" "NoRepair" 1
+!endif
 SectionEnd
+
+Function .onInstSuccess
+  ${If} $UpdatePID != ""
+    Exec '$\"$INSTDIR\Nearby.exe$\"'
+  ${EndIf}
+FunctionEnd
 
 Section "Uninstall"
   SetShellVarContext current

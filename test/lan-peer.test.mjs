@@ -38,9 +38,8 @@ test('two independent PC engines pair, transfer binary and empty files both ways
     const binary = Buffer.from([0, 255, 1, 128, 10, 13]);
     for (const bytes of [binary, Buffer.alloc(0)]) {
       const offer = await (await request(second, '/api/peer/remote/api/offers', { method: 'POST', data: { name: 'ПК-файл.bin', size: bytes.length } })).json();
-      assert.equal((await request(second, `/api/peer/remote/api/offers/${offer.id}/upload`, { method: 'POST', body: bytes })).status, 409);
+      assert.equal(offer.state, 'accepted', 'An authenticated PC connection permits automatic receiving');
       assert.equal((await request(second, `/api/peer/remote/api/offers/${offer.id}`, { method: 'POST', data: { action: 'accept' } })).status, 403);
-      assert.equal((await request(first, `/api/offers/${offer.id}`, { method: 'POST', data: { action: 'accept' } })).status, 200);
       const sent = await request(second, `/api/peer/remote/api/offers/${offer.id}/upload`, { method: 'POST', body: bytes });
       assert.equal(sent.status, 201); assert.equal((await sent.json()).state, 'completed');
       const saved = (await readdir(first.inbox)).filter(file => file.endsWith('-ПК-файл.bin'));
@@ -57,6 +56,7 @@ test('two independent PC engines pair, transfer binary and empty files both ways
     assert.equal((await request(second, '/api/peer/disconnect', { method: 'POST', data: {} })).status, 200);
     assert.equal((await request(second, '/api/peer/remote/api/state')).status, 409);
     assert.equal((await (await request(second, '/api/state')).json()).admin, true);
+    assert.deepEqual((await (await request(first, '/api/state')).json()).connectedDevices, []);
     assert.equal((await request(second, '/api/peer/connect', { method: 'POST', data: connection })).status, 200);
     await first.close(); first = null;
     assert.equal((await request(second, '/api/peer/remote/api/state')).status, 504);

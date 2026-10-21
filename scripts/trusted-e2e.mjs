@@ -18,9 +18,11 @@ try {
   const posts = [];
   for (const page of [host, client]) { page.on('pageerror', e => errors.push(e.message)); page.on('request', r => { if (r.method() === 'POST') posts.push(new URL(r.url()).pathname); }); }
   await Promise.all([host.goto(first.adminUrl), client.goto(second.adminUrl)]);
-  const discovered = client.locator('#nearby-devices .file-row').filter({ hasText: 'Первый проверенный ПК' });
-  await discovered.getByRole('button', { name: 'Сопрячь устройства' }).click();
+  for (const page of [host,client]) await page.locator('#saved-devices').evaluate(node => { node.open = true; });
+  const discovered = client.locator('#nearby-devices .device-card').filter({ hasText: 'Первый проверенный ПК' });
+  await discovered.getByRole('button', { name: 'Подключиться', exact: true }).click();
   await Promise.all([host.locator('.pairing-code').waitFor(), client.locator('.pairing-code').waitFor()]);
+  for (const page of [host, client]) assert.equal(await page.locator('#transfer-workspace').isVisible(), false, 'Pairing is not yet a connection');
   const code = await host.locator('.pairing-code').textContent(); assert.equal(code, await client.locator('.pairing-code').textContent()); assert.equal(code.replaceAll(' ', '').length, 64);
   await mkdir('artifacts', { recursive: true });
   await client.setViewportSize({ width: 390, height: 844 }); assert.ok(await client.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
@@ -34,41 +36,48 @@ try {
   await hostSaved.getByRole('button', { name: 'Переименовать' }).click();
   await hostSaved.getByRole('textbox', { name: 'Новое имя устройства' }).fill('Рабочий ноутбук');
   await hostSaved.getByRole('button', { name: 'Сохранить имя' }).click();
+  await host.locator('#saved-devices').evaluate(node => { node.open = true; }); await client.locator('#saved-devices').evaluate(node => { node.open = true; });
   await host.locator('#trusted-devices .file-row').filter({ hasText: 'Рабочий ноутбук' }).waitFor();
+  for (const page of [host, client]) assert.equal(await page.locator('#transfer-workspace').isVisible(), false, 'Saved trust is not an active connection');
   const saved = client.locator('#trusted-devices .file-row').filter({ hasText: 'Первый проверенный ПК' });
   await saved.getByRole('button', { name: 'Подключиться защищённо' }).click();
-  await client.locator('#pc-transport').filter({ hasText: 'TLS 1.3' }).waitFor();
+  await client.waitForFunction(() => document.querySelector('#pc-transport').textContent.includes('TLS 1.3'));
+  await host.locator('#transfer-workspace').waitFor();
+  await client.locator('#transfer-workspace').waitFor();
   const bytes = randomBytes(1024 * 1024 + 13);
   for (const [name, content] of [['secure-peer.bin', bytes], ['secure-empty.txt', Buffer.alloc(0)]]) {
     await client.locator('#files').setInputFiles({ name, mimeType: 'application/octet-stream', buffer: content });
-    await host.locator('#incoming .file-row').filter({ hasText: name }).getByRole('button', { name: 'Принять', exact: true }).click();
     await client.locator('#queue .file-row').filter({ hasText: name }).getByText('Получено и сохранено на компьютере', { exact: true }).waitFor();
     const file = (await readdir(first.inbox)).find(value => value.endsWith('-' + name)); assert.equal(hash(await readFile(path.join(first.inbox, file))), hash(content));
+    const downloading = client.waitForEvent('download');
     await host.locator('#files').setInputFiles({ name: 'back-' + name, mimeType: 'application/octet-stream', buffer: content });
     const receiving = client.locator('#shared .file-row').filter({ hasText: 'back-' + name });
-    const downloading = client.waitForEvent('download'); await receiving.getByRole('button', { name: 'Скачать', exact: true }).click();
+
     const download = await downloading; assert.equal(hash(await readFile(await download.path())), hash(content));
   }
-  await client.reload(); await client.locator('#pc-transport').filter({ hasText: 'TLS 1.3' }).waitFor();
+  await client.reload(); await client.waitForFunction(() => document.querySelector('#pc-transport').textContent.includes('TLS 1.3'));
   const savedFingerprint = await saved.getAttribute('data-fingerprint');
   await Promise.all(applications.map(app => app.close())); applications.length = 0;
   for (const name of ['Первый проверенный ПК', 'Второй проверенный ПК']) applications.push(await createApp({ host: '127.0.0.1', port: 0, statistics: false, storage: path.join(directory, String(applications.length)),
     trustedLan: { identityOptions: { protection: process.env.NEARBY_TEST_DPAPI === '1' ? 'dpapi' : 'file', name } }, discovery: { socketFactory: () => bus.createSocket(), getInterfaces: () => [{ address: '127.0.0.1' }] } }));
   [first, second] = applications;
   await Promise.all([host.goto(first.adminUrl), client.goto(second.adminUrl)]);
+  for (const page of [host,client]) await page.locator('#saved-devices').evaluate(node => { node.open = true; });
   await host.locator('#trusted-devices .file-row').filter({ hasText: 'Рабочий ноутбук' }).waitFor();
-  await client.locator('#nearby-devices .file-row').filter({ hasText: 'Первый проверенный ПК' }).getByRole('button', { name: 'Подключиться защищённо' }).waitFor();
+  await client.locator('#nearby-devices .device-card').filter({ hasText: 'Первый проверенный ПК' }).getByRole('button', { name: 'Подключиться', exact: true }).waitFor();
   assert.equal(await saved.getAttribute('data-fingerprint'), savedFingerprint);
   await saved.getByRole('button', { name: 'Подключиться защищённо' }).click();
-  await client.locator('#pc-transport').filter({ hasText: 'TLS 1.3' }).waitFor();
+  await client.waitForFunction(() => document.querySelector('#pc-transport').textContent.includes('TLS 1.3'));
   await mkdir('artifacts', { recursive: true });
   await host.screenshot({ path: 'artifacts/nearby-trusted-host.png', fullPage: true });
   await client.setViewportSize({ width: 390, height: 844 }); assert.ok(await client.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   await client.screenshot({ path: 'artifacts/nearby-trusted-mobile.png', fullPage: true });
-  await saved.getByRole('button', { name: 'Забыть устройство' }).click();
+  await client.locator('#tab-connection').click(); await client.locator('#saved-devices').evaluate(node => { node.open = true; }); await saved.getByRole('button', { name: 'Забыть устройство' }).click();
   await client.locator('#connection').waitFor();
   await client.waitForFunction(() => document.querySelectorAll('#trusted-devices [data-fingerprint]').length === 0);
   await host.waitForFunction(() => document.querySelectorAll('#trusted-devices [data-fingerprint]').length === 0);
+  await host.waitForFunction(() => document.querySelector('#files').disabled);
+  assert.equal(await client.locator('#files').isDisabled(), true);
   assert.ok(!posts.includes('/api/join'), 'TLS pairing and transfers do not submit a legacy PIN');
   assert.equal(posts.filter(route => route === '/api/trust/pair').length, 1, 'Restart does not require new pairing');
   if (process.env.NEARBY_TEST_DPAPI === '1') for (const name of ['0', '1']) { const stored = await readFile(path.join(directory, name, 'device-identity.json'), 'utf8'); assert.equal(JSON.parse(stored).protection, 'dpapi'); assert.ok(!stored.includes('PRIVATE KEY')); }

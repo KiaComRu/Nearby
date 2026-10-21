@@ -1,6 +1,6 @@
 {
   "name": "nearby-transfer",
-  "version": "0.5.2",
+  "version": "0.5.7",
   "private": true,
   "description": "Nearby — передача файлов по локальной сети и через интернет",
   "type": "module",
@@ -23,9 +23,12 @@
     "test:web": "node --test test/browser-*.test.mjs",
     "test:browser": "node scripts/browser-e2e.mjs",
     "test:internet": "node scripts/internet-e2e.mjs",
+    "test:web:i18n": "node scripts/web-i18n-e2e.mjs",
     "test:discovery": "node scripts/discovery-e2e.mjs",
     "test:trusted": "node scripts/trusted-e2e.mjs",
-    "test:pc": "node scripts/pc-e2e.mjs"
+    "test:pc": "node scripts/pc-e2e.mjs",
+    "test:desktop:parity": "node scripts/desktop-parity-e2e.mjs",
+    "test:desktop:native": "node scripts/desktop-parity-native-e2e.mjs"
   },
   "dependencies": {
     "qrcode": "1.5.4",

@@ -89,13 +89,12 @@ test('rejects requests from a different web origin and unexpected Host', async (
   assert.equal(result, 403);
 });
 
-test('upload requires approval; another guest cannot approve or use the offer', async () => {
+test('authenticated connection accepts files automatically; another guest cannot approve or use the offer', async () => {
   const incoming = await offer('approved.txt', 5);
-  assert.equal((await call(`/api/offers/${incoming.id}/upload`, { method: 'POST', body: 'hello' })).status, 409);
+  assert.equal(incoming.state, 'accepted');
   assert.equal((await call(`/api/offers/${incoming.id}`, { method: 'POST', data: { action: 'accept' } })).status, 403);
   const otherState = await (await call('/api/state', { key: other })).json();
   assert.ok(!otherState.offers.some(x => x.id === incoming.id));
-  await accept(incoming.id);
   assert.equal((await call(`/api/offers/${incoming.id}/upload`, { method: 'POST', key: other, body: 'hello' })).status, 403);
   const sent = await call(`/api/offers/${incoming.id}/upload`, { method: 'POST', body: 'hello' });
   assert.equal(sent.status, 201);

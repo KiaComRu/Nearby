@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { createInterface } from 'node:readline';
 import { createApp } from '../../server.mjs';
 
 // The launcher supplies paths outside the installation directory. Never write
@@ -19,6 +20,10 @@ async function stop() {
   await app.close();
 }
 process.stdin.resume();
-process.stdin.on('data', () => { stop().catch(() => { process.exitCode = 1; }); });
+createInterface({ input: process.stdin }).on('line', command => {
+  if (command === 'prepare-update') console.log(JSON.stringify({ updateReady: app.prepareUpdate() }));
+  else if (command === 'cancel-update') app.cancelUpdate();
+  else stop().catch(() => { process.exitCode = 1; });
+});
 process.stdin.on('end', () => { stop().catch(() => { process.exitCode = 1; }); });
 for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, stop);

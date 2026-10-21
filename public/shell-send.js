@@ -103,12 +103,13 @@
         if (entry.file.size > target.maxSize) throw new Error('Файл превышает лимит получателя.');
         if (target.kind === 'client') {
           entry.state = 'sending'; entry.message = `Предлагаем «${target.name}»`; render();
-          await upload(`/api/shares?recipient=${encodeURIComponent(target.id)}&name=${encodeURIComponent(entry.file.name)}&size=${entry.file.size}`, entry, target, signal);
+          const uploaded = await upload(`/api/shares?recipient=${encodeURIComponent(target.id)}&name=${encodeURIComponent(entry.file.name)}&size=${entry.file.size}`, entry, target, signal);
           entry.message = `Доступен только «${target.name}» — ожидает скачивания`;
+          document.dispatchEvent(new CustomEvent('nearby-shell-transfer', { detail: { file: entry.file, uploaded, target } }));
         } else {
           const prefix = '/api/peer/remote';
           const offer = await request(prefix + '/api/offers', { data: { name: entry.file.name, size: entry.file.size }, target, signal });
-          entry.state = 'waiting'; entry.message = `Ожидаем подтверждение «${target.name}»`; render();
+          entry.state = 'waiting'; entry.message = `Подготавливаем приём у «${target.name}»`; render();
           const deadline = Date.now() + 5 * 60_000;
           while (true) {
             if (Date.now() >= deadline) throw new Error('Время ожидания истекло. Отправьте файл ещё раз.');
@@ -119,7 +120,8 @@
             await pause(signal);
           }
           entry.state = 'sending'; entry.message = `Передаём «${target.name}»`; render();
-          await upload(prefix + `/api/offers/${offer.id}/upload`, entry, target, signal);
+          const uploaded = await upload(prefix + `/api/offers/${offer.id}/upload`, entry, target, signal);
+          document.dispatchEvent(new CustomEvent('nearby-shell-transfer', { detail: { file: entry.file, uploaded, target } }));
           entry.message = `Получено и сохранено на «${target.name}»`;
         }
         entry.state = 'done';

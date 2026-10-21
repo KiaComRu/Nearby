@@ -44,6 +44,10 @@ test('mutual TLS pairing requires both owners; protects files, persists identity
     const remote = await tlsJson(secureOrigin, '/api/state', firstTls); assert.equal(remote.admin, false); assert.ok(!JSON.stringify(remote).includes(second.adminToken));
     for (const route of ['/api/trust', '/api/received/open', '/api/discovery']) await assert.rejects(tlsJson(secureOrigin, route, firstTls), error => error.status === 403);
     const connected = await call(first, '/api/peer/connect', { fingerprint: secondIdentity.fingerprint, address: address(second) }); assert.equal(connected.status, 200); assert.equal(connected.peer.secure, true);
+    assert.deepEqual((await call(second, '/api/state')).connectedDevices, [{ name: firstIdentity.name, secure: true }]);
+    await call(first, '/api/peer/disconnect', {});
+    assert.deepEqual((await call(second, '/api/state')).connectedDevices, [], 'TLS disconnect clears inbound presence');
+    assert.equal((await call(first, '/api/peer/connect', { fingerprint: secondIdentity.fingerprint, address: address(second) })).status, 200);
     const bytes = Buffer.from([0, 255, 10, 128, 20]);
     const offer = await call(first, '/api/peer/remote/api/offers', { name: 'encrypted.bin', size: bytes.length }); assert.equal(offer.status, 201);
     await call(second, `/api/offers/${offer.id}`, { action: 'accept' });
@@ -64,6 +68,7 @@ test('mutual TLS pairing requires both owners; protects files, persists identity
     assert.equal((await call(first, '/api/trust')).devices.length, 1);
     assert.equal((await call(first, '/api/peer/connect', { fingerprint: secondIdentity.fingerprint, address: address(second) })).status, 200);
     const revoked = await call(second, '/api/trust/revoke', { fingerprint: firstIdentity.fingerprint }); assert.equal(revoked.status, 200);
+    assert.deepEqual((await call(second, '/api/state')).connectedDevices, [], 'Revoked trust clears inbound presence');
     await assert.rejects(tlsJson(`https://127.0.0.1:${(await call(second, '/api/info')).secure.port}`, '/api/state', firstTls), error => error.status === 403);
     assert.equal((await call(second, '/api/trust')).devices.length, 0);
     const reconnect = await call(first, '/api/peer/connect', { fingerprint: secondIdentity.fingerprint, address: address(second) }); assert.notEqual(reconnect.status, 200);

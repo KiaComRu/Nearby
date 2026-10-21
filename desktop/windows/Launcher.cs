@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -14,8 +14,8 @@ using Microsoft.Web.WebView2.WinForms;
 
 [assembly: System.Reflection.AssemblyTitle("Nearby")]
 [assembly: System.Reflection.AssemblyDescription("Передача файлов по локальной сети")]
-[assembly: System.Reflection.AssemblyVersion("0.5.2.0")]
-[assembly: System.Reflection.AssemblyFileVersion("0.5.2.0")]
+[assembly: System.Reflection.AssemblyVersion("0.5.7.0")]
+[assembly: System.Reflection.AssemblyFileVersion("0.5.7.0")]
 #if SERVER2016
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.6.2")]
 #endif
@@ -63,13 +63,32 @@ internal sealed class NearbyWindow : Form
     private bool engineStopping;
     private string origin;
     private bool webReady, applyingShellFiles;
+    private readonly Action<string> openLocalFile;
+    private readonly Dictionary<string, string> localFiles = new Dictionary<string, string>();
     private readonly List<string> shellFiles = new List<string>();
     private readonly System.Windows.Forms.Timer shellTimer = new System.Windows.Forms.Timer();
     private DateTime lastShellRequest;
+    private readonly Panel updatePanel = new Panel();
+    private readonly Label updateText = new Label();
+    private readonly Button installUpdate = new Button();
+    private readonly Button laterUpdate = new Button();
+    private readonly ToolStripStatusLabel checkUpdate = new ToolStripStatusLabel("Проверить обновления");
+    private readonly NotifyIcon updateNotification = new NotifyIcon();
+    private readonly System.Windows.Forms.Timer updateTimer = new System.Windows.Forms.Timer();
+    private readonly CancellationTokenSource updateCancellation = new CancellationTokenSource();
+    private DesktopUpdates updater;
+    private DesktopUpdateInfo availableUpdate;
+    private bool checkingUpdate, downloadingUpdate;
+    private string downloadedUpdate;
+    private int activeDownloads;
+    private bool engineUpdateUnavailable;
+    private readonly Func<string, DesktopUpdates> updateFactory;
+    private readonly Action<ProcessStartInfo> startInstaller;
+    private readonly bool showNativeNotifications;
 
     internal void QueueShellFiles(string[] paths)
     {
-        if (shuttingDown) return;
+        if (shuttingDown || !web.Enabled) return;
         if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
         Show(); Activate();
         foreach (string value in paths) {
@@ -114,8 +133,16 @@ internal sealed class NearbyWindow : Form
         finally { Marshal.FreeCoTaskMem(pointer); }
     }
 
-    public NearbyWindow()
+    public NearbyWindow() : this(null, null) { }
+
+    internal NearbyWindow(Func<string, DesktopUpdates> updateFactory, Action<ProcessStartInfo> startInstaller) : this(updateFactory, startInstaller, null) { }
+
+    internal NearbyWindow(Func<string, DesktopUpdates> updateFactory, Action<ProcessStartInfo> startInstaller, Action<string> openLocalFile)
     {
+        this.openLocalFile = openLocalFile ?? (file => Process.Start(new ProcessStartInfo(file) { UseShellExecute = true }));
+        this.updateFactory = updateFactory ?? (directory => new DesktopUpdates(directory));
+        showNativeNotifications = updateFactory == null;
+        this.startInstaller = startInstaller ?? (start => { if (Process.Start(start) == null) throw new IOException("Установщик не запустился."); });
         Text = "Nearby";
         Width = 1180; Height = 860;
         MinimumSize = new Size(760, 560);
@@ -130,11 +157,140 @@ internal sealed class NearbyWindow : Form
         web.Dock = DockStyle.Fill;
         web.Visible = false;
         Controls.Add(web); Controls.Add(loading);
+        BuildUpdateControls();
+        web.BringToFront(); // Fill only the space left by the notification and status bar.
         Load += async delegate { await StartAsync(); };
         shellTimer.Interval = 300;
         shellTimer.Tick += async delegate { await ApplyShellFiles(); };
         shellTimer.Start();
-        FormClosing += delegate { shuttingDown = true; shellTimer.Stop(); shellTimer.Dispose(); StopEngine(); };
+        FormClosing += delegate {
+            shuttingDown = true; updateCancellation.Cancel(); updateTimer.Stop(); updateTimer.Dispose();
+            updateNotification.Dispose(); if (updater != null) updater.Dispose();
+            shellTimer.Stop(); shellTimer.Dispose(); StopEngine();
+        };
+    }
+
+    private void BuildUpdateControls()
+    {
+        var footer = new StatusStrip { Name = "nearby-update-status" };
+        footer.Items.Add(new ToolStripStatusLabel("Nearby " + GetType().Assembly.GetName().Version.ToString(3)));
+        footer.Items.Add(new ToolStripStatusLabel { Spring = true });
+        checkUpdate.IsLink = true; checkUpdate.Click += async delegate { await CheckForUpdate(true); };
+        footer.Items.Add(checkUpdate); Controls.Add(footer);
+        updatePanel.Name = "nearby-update-banner";
+        updatePanel.Dock = DockStyle.Top; updatePanel.Height = 66; updatePanel.Visible = false;
+        web.Name = "nearby-webview";
+        updatePanel.BackColor = Color.FromArgb(226, 241, 230); updatePanel.Padding = new Padding(12, 8, 12, 8);
+        var actions = new FlowLayoutPanel { Dock = DockStyle.Right, Width = 210, FlowDirection = FlowDirection.LeftToRight, WrapContents = false };
+        installUpdate.Name = "nearby-install-update";
+        installUpdate.Text = "Обновить"; installUpdate.Width = 100; installUpdate.Height = 34;
+        laterUpdate.Text = "Позже"; laterUpdate.Width = 90; laterUpdate.Height = 34;
+        actions.Controls.Add(installUpdate); actions.Controls.Add(laterUpdate);
+        updateText.Dock = DockStyle.Fill; updateText.Font = new Font("Segoe UI", 10); updateText.TextAlign = ContentAlignment.MiddleLeft;
+        updatePanel.Controls.Add(updateText); updatePanel.Controls.Add(actions); Controls.Add(updatePanel);
+        updatePanel.BringToFront(); footer.BringToFront();
+        installUpdate.Click += async delegate { await InstallAvailableUpdate(); };
+        laterUpdate.Click += delegate { updatePanel.Visible = false; updateNotification.Visible = false; };
+        updateNotification.Text = "Обновление Nearby";
+        updateNotification.BalloonTipClicked += delegate { ShowUpdate(); };
+        updateNotification.Click += delegate { ShowUpdate(); };
+        updateTimer.Interval = 6 * 60 * 60 * 1000;
+        updateTimer.Tick += async delegate { await CheckForUpdate(false); };
+    }
+
+    private void ShowUpdate()
+    {
+        if (shuttingDown) return;
+        if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+        Show(); Activate(); updatePanel.Visible = true;
+    }
+
+    private async Task CheckForUpdate(bool manual)
+    {
+        if (updater == null || checkingUpdate || downloadingUpdate || shuttingDown) return;
+        checkingUpdate = true; checkUpdate.Enabled = false;
+        try {
+            var found = await updater.CheckAsync(GetType().Assembly.GetName().Version, updateCancellation.Token);
+            if (shuttingDown) return;
+            if (found == null) {
+                if (manual) MessageBox.Show(this, "Установлена последняя версия Nearby.", "Обновление Nearby");
+                return;
+            }
+            if (availableUpdate == null || availableUpdate.Version != found.Version) downloadedUpdate = null;
+            availableUpdate = found;
+            updateText.Text = "Доступна Nearby " + found.DisplayVersion + ".\nОбновитесь без удаления приложения и ваших файлов.";
+            installUpdate.Text = downloadedUpdate == null ? "Обновить" : "Установить";
+            updatePanel.Visible = true;
+            if (showNativeNotifications) {
+                updateNotification.Icon = Icon ?? SystemIcons.Information; updateNotification.Visible = true;
+                updateNotification.ShowBalloonTip(8000, "Доступна Nearby " + found.DisplayVersion, "Нажмите, чтобы открыть предложение обновления.", ToolTipIcon.Info);
+            }
+        } catch (Exception) {
+            if (manual && !shuttingDown) MessageBox.Show(this, "Не удалось проверить обновления. Проверьте интернет и повторите позже.", "Обновление Nearby");
+        } finally { checkingUpdate = false; if (!shuttingDown) checkUpdate.Enabled = true; }
+    }
+
+    private async Task<bool> UpdateBusy()
+    {
+        if (!webReady || shellFiles.Count > 0 || applyingShellFiles || activeDownloads > 0) return true;
+        return await web.CoreWebView2.ExecuteScriptAsync("Boolean(!window.nearbyUpdateBusy || window.nearbyUpdateBusy())") != "false";
+    }
+
+    private async Task<bool> PrepareEngineUpdate()
+    {
+        if (engineUpdateUnavailable) throw new IOException("Перезапустите Nearby и повторите обновление.");
+        engine.StandardInput.WriteLine("prepare-update"); engine.StandardInput.Flush();
+        var line = engine.StandardOutput.ReadLineAsync();
+        if (await Task.WhenAny(line, Task.Delay(5000)) != line) {
+            engineUpdateUnavailable = true;
+            throw new IOException("Движок передачи не ответил. Перезапустите Nearby и повторите обновление.");
+        }
+        var reply = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(await line);
+        return reply != null && reply.ContainsKey("updateReady") && (bool)reply["updateReady"];
+    }
+
+    private async Task InstallAvailableUpdate()
+    {
+        if (availableUpdate == null || downloadingUpdate || shuttingDown) return;
+        downloadingUpdate = true; installUpdate.Enabled = false; laterUpdate.Enabled = false; checkUpdate.Enabled = false;
+        bool frozen = false;
+        try {
+            if (downloadedUpdate == null) {
+                var progress = new Progress<int>(value => { if (!shuttingDown) updateText.Text = value < 0 ? "Скачиваем обновление Nearby…" : "Скачиваем Nearby " + availableUpdate.DisplayVersion + ": " + value + "%"; });
+                downloadedUpdate = await updater.DownloadAsync(availableUpdate, progress, updateCancellation.Token);
+            }
+            if (shuttingDown) return;
+            if (await UpdateBusy()) {
+                updateText.Text = "Обновление скачано. Завершите текущую передачу или отправку из Проводника, затем нажмите «Установить».";
+                installUpdate.Text = "Установить"; return;
+            }
+            // Block new local gestures while the host atomically freezes incoming mutations.
+            web.Enabled = false;
+            frozen = true;
+            if (!await PrepareEngineUpdate()) {
+                frozen = false; web.Enabled = true;
+                updateText.Text = "Обновление скачано. Дождитесь окончания передачи, затем нажмите «Установить».";
+                installUpdate.Text = "Установить"; return;
+            }
+            await Task.Run(delegate { DesktopUpdates.Verify(downloadedUpdate, availableUpdate); }, updateCancellation.Token);
+            if (shuttingDown) return;
+            var start = new ProcessStartInfo(downloadedUpdate, "/S /UPDATEPID=" + Process.GetCurrentProcess().Id);
+            start.UseShellExecute = false; start.CreateNoWindow = true; start.WorkingDirectory = Path.GetDirectoryName(downloadedUpdate);
+            startInstaller(start);
+            Close();
+        } catch (Exception error) {
+            if (!shuttingDown) {
+                if (frozen) {
+                    try { engine.StandardInput.WriteLine("cancel-update"); engine.StandardInput.Flush(); } catch { }
+                }
+                web.Enabled = true; downloadedUpdate = null;
+                updateText.Text = "Обновление не установлено. Можно повторить попытку.";
+                MessageBox.Show(this, "Не удалось обновить Nearby.\n\n" + error.Message, "Обновление Nearby");
+            }
+        } finally {
+            downloadingUpdate = false;
+            if (!shuttingDown) { installUpdate.Enabled = true; laterUpdate.Enabled = true; checkUpdate.Enabled = true; }
+        }
     }
 
     private async Task StartAsync()
@@ -147,6 +303,9 @@ internal sealed class NearbyWindow : Form
             string receive = Environment.GetEnvironmentVariable("NEARBY_RECEIVE_DIR");
             if (String.IsNullOrEmpty(receive)) receive = Path.Combine(DownloadsDirectory(), "Nearby");
             Directory.CreateDirectory(data); Directory.CreateDirectory(receive);
+            updater = updateFactory(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Nearby", "Updates"));
+            try { updater.CleanOldDownloads(); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            updateTimer.Start();
 
             // Detect the runtime before starting a LAN listener.
             CoreWebView2Environment.GetAvailableBrowserVersionString();
@@ -192,26 +351,78 @@ internal sealed class NearbyWindow : Form
                 Uri target;
                 if (e.IsUserInitiated && Uri.TryCreate(e.Uri, UriKind.Absolute, out target)
                     && target.Scheme == "https" && target.Host == "nearby.kiacom.ru" && target.Port == 443
-                    && target.UserInfo == "" && target.AbsolutePath == "/web/" && target.Query == "" && target.Fragment == "#mode=internet") {
+                    && target.UserInfo == "" && target.AbsolutePath == "/web/" && target.Query == "" && (target.Fragment == "" || target.Fragment == "#mode=internet" || target.Fragment == "#mode=auto")) {
                     try { Process.Start(new ProcessStartInfo(target.AbsoluteUri) { UseShellExecute = true }); }
-                    catch (Exception) { MessageBox.Show(this, "Откройте https://nearby.kiacom.ru/web/#mode=internet в браузере.", "Интернет-режим Nearby"); }
+                    catch (Exception) { MessageBox.Show(this, "Откройте https://nearby.kiacom.ru/web/ в браузере.", "Интернет-режим Nearby"); }
                 }
+            };
+            web.CoreWebView2.WebMessageReceived += async delegate(object sender, CoreWebView2WebMessageReceivedEventArgs e) {
+                Uri source;
+                if (!Uri.TryCreate(e.Source, UriKind.Absolute, out source) || source.GetLeftPart(UriPartial.Authority) != origin || source.AbsolutePath != "/") return;
+                try {
+                    var serializer = new JavaScriptSerializer();
+                    var value = serializer.Deserialize<Dictionary<string, object>>(e.WebMessageAsJson);
+                    string type = value.ContainsKey("type") ? value["type"] as string : null;
+                    string id = value.ContainsKey("id") ? value["id"] as string : null;
+                    if (String.IsNullOrEmpty(id) || id.Length > 100) return;
+                    if (type == "nearby-register-file") {
+                        bool ok = false;
+                        string objectId = null;
+                        try {
+                            int index = Convert.ToInt32(value["index"]);
+                            if (index < 0 || index >= 10000 || localFiles.Count >= 2000) throw new InvalidOperationException();
+                            var evaluated = serializer.Deserialize<Dictionary<string, object>>(await web.CoreWebView2.CallDevToolsProtocolMethodAsync("Runtime.evaluate", serializer.Serialize(new { expression = "document.getElementById('files').files[" + index + "]" })));
+                            var result = (Dictionary<string, object>)evaluated["result"];
+                            objectId = result.ContainsKey("objectId") ? result["objectId"] as string : null;
+                            if (objectId == null) throw new InvalidOperationException();
+                            var info = serializer.Deserialize<Dictionary<string, object>>(await web.CoreWebView2.CallDevToolsProtocolMethodAsync("DOM.getFileInfo", serializer.Serialize(new { objectId = objectId })));
+                            string file = info["path"] as string;
+                            if (!String.IsNullOrEmpty(file) && Path.IsPathRooted(file) && File.Exists(file)) { localFiles[id] = file; ok = true; }
+                        } catch { /* Browser-only and drag-and-drop files retain their download fallback. */ }
+                        if (objectId != null) try { await web.CoreWebView2.CallDevToolsProtocolMethodAsync("Runtime.releaseObject", serializer.Serialize(new { objectId = objectId })); } catch {}
+                        web.CoreWebView2.PostWebMessageAsJson(serializer.Serialize(new { type = "nearby-file-registered", id = id, ok = ok }));
+                    } else if (type == "nearby-open-file" && localFiles.ContainsKey(id)) {
+                        string file = localFiles[id];
+                        if (!File.Exists(file)) throw new FileNotFoundException("Файл был перемещён или удалён.");
+                        openLocalFile(file);
+                    }
+                } catch (Exception error) { MessageBox.Show(this, error.Message, "Открытие файла Nearby"); }
             };
             web.CoreWebView2.PermissionRequested += delegate(object sender, CoreWebView2PermissionRequestedEventArgs e) { e.State = CoreWebView2PermissionState.Deny; };
             web.CoreWebView2.DownloadStarting += delegate(object sender, CoreWebView2DownloadStartingEventArgs e) {
+                string recordId = null;
+                Uri downloadUri;
+                if (Uri.TryCreate(e.DownloadOperation.Uri, UriKind.Absolute, out downloadUri) && downloadUri.GetLeftPart(UriPartial.Authority) == origin
+                    && (downloadUri.AbsolutePath == "/api/peer/download" || System.Text.RegularExpressions.Regex.IsMatch(downloadUri.AbsolutePath, @"^/api/shares/[a-f0-9-]{36}/download$"))) {
+                    var match = System.Text.RegularExpressions.Regex.Match(downloadUri.Query, @"(?:[?&])nearbyFile=([a-f0-9-]{36})(?:&|$)");
+                    Guid parsed;
+                    if (match.Success && Guid.TryParse(match.Groups[1].Value, out parsed)) recordId = parsed.ToString();
+                }
+                string savedPath = null;
+                activeDownloads++;
+                bool finished = false;
+                e.DownloadOperation.StateChanged += delegate {
+                    if (!finished && e.DownloadOperation.State != CoreWebView2DownloadState.InProgress) {
+                        finished = true; activeDownloads--;
+                        if (recordId != null && savedPath != null && e.DownloadOperation.State == CoreWebView2DownloadState.Completed) {
+                            if (localFiles.Count < 2000) localFiles[recordId] = savedPath;
+                            web.CoreWebView2.PostWebMessageAsJson(new JavaScriptSerializer().Serialize(new { type = "nearby-download-complete", id = recordId, ok = true }));
+                        }
+                    }
+                };
                 var deferral = e.GetDeferral();
                 try {
-                    using (var dialog = new SaveFileDialog()) {
-                        dialog.InitialDirectory = receive;
-                        dialog.FileName = Path.GetFileName(e.ResultFilePath);
-                        dialog.OverwritePrompt = true;
-                        if (dialog.ShowDialog(this) == DialogResult.OK) e.ResultFilePath = dialog.FileName;
-                        else e.Cancel = true;
-                    }
+                    // The connected device already has permission to exchange files.
+                    // A unique destination prevents replacing an existing download.
+                    Directory.CreateDirectory(receive);
+                    e.ResultFilePath = Path.Combine(receive, Guid.NewGuid().ToString() + "-" + Path.GetFileName(e.ResultFilePath));
+                    savedPath = e.ResultFilePath;
+                    e.Handled = true;
                 } finally { deferral.Complete(); }
             };
             web.CoreWebView2.Navigate(address.AbsoluteUri);
             web.Visible = true; loading.Visible = false;
+            await CheckForUpdate(false);
         }
         catch (WebView2RuntimeNotFoundException)
         {

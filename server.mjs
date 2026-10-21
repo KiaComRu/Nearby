@@ -79,6 +79,7 @@ export async function createApp({
   assetsDirectory = path.join(here, 'public'),
   maxSize = 100 * 1024 ** 3,
   openReceivedFolder = openFolder,
+  openTransferredFile = openFolder,
   statistics = {},
   discovery = host === '0.0.0.0' && process.env.NEARBY_DISABLE_DISCOVERY !== '1' ? {} : false,
   trustedLan = host === '0.0.0.0' && process.env.NEARBY_DISABLE_TRUSTED_LAN !== '1' ? {} : false,
@@ -114,6 +115,8 @@ export async function createApp({
   const shares = new Map();
   const tickets = new Map();
   const active = new Set();
+  const transferRequests = new Set();
+  let preparingUpdate = false;
   let closing = false;
   let boundPort;
   const addressScore = value => value.startsWith('192.168.') ? 0 : value.startsWith('10.') ? 1 : 2;
@@ -134,7 +137,7 @@ export async function createApp({
   }
   const publicOffer = ({ id, name, size, state, created, received, device, error, secure }) =>
     ({ id, name, size, state, created, received, device, error, secure });
-  const publicShare = ({ id, name, size, recipientName }) => ({ id, name, size, recipientName });
+  const publicShare = ({ id, name, size, recipientName, created, state, completedAt }) => ({ id, name, size, recipientName, created, state, completedAt });
 
   function auth(req, adminOnly = false) {
     if (req.socket.encrypted) { if (adminOnly) throw fail(403, 'Нужен локальный владелец.'); return trustedService.authentication(req); }
@@ -212,6 +215,8 @@ export async function createApp({
     ['/shell-send.css', ['shell-send.css', 'text/css; charset=utf-8']],
     ['/statistics.js', ['statistics.js', 'text/javascript; charset=utf-8']],
     ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
+    ['/workspace.css', ['workspace.css', 'text/css; charset=utf-8']],
+    ['/tabs.js', ['tabs.js', 'text/javascript; charset=utf-8']],
     ['/favicon.ico', ['favicon.ico', 'image/x-icon']],
     ['/favicon.svg', ['favicon.svg', 'image/svg+xml']],
     ['/apple-touch-icon.png', ['apple-touch-icon.png', 'image/png']],
@@ -232,6 +237,14 @@ export async function createApp({
         throw fail(403, 'Запрос с другого сайта запрещён.');
       }
       prune();
+      // The native host freezes new mutations atomically before closing for an update.
+      const transfersData = /\/(?:upload|download)$/.test(url.pathname) || (req.method === 'POST' && /\/(?:shares|offers)$/.test(url.pathname));
+      if (preparingUpdate && url.pathname.startsWith('/api/') && (req.method !== 'GET' || transfersData)) throw fail(503, 'Nearby обновляется. Подключитесь снова после перезапуска.');
+      if (transfersData) {
+        const requestId = Symbol(); transferRequests.add(requestId);
+        const done = () => transferRequests.delete(requestId);
+        res.once('finish', done); res.once('close', done);
+      }
       if (req.method === 'GET' && url.pathname === '/api/send-targets') {
         auth(req, true);
         const targets = [...connectedDevices.values()].map(({ id, name, secure }) => ({ id, name, secure, kind: 'client', maxSize }));
@@ -353,6 +366,15 @@ export async function createApp({
         json(res, 200, { ok: true });
         return;
       }
+      if (req.method === 'POST' && url.pathname === '/api/files/open') {
+        auth(req, true);
+        const body = await jsonBody(req);
+        const file = body.kind === 'offer' ? offers.get(body.id) : body.kind === 'share' ? shares.get(body.id) : null;
+        if (!file?.path || (body.kind === 'offer' && file.state !== 'completed')) throw fail(404, 'Файл не найден или ещё не принят.');
+        await stat(file.path);
+        await openTransferredFile(file.path);
+        json(res, 200, { ok: true }); return;
+      }
       if (req.method === 'GET' && url.pathname === '/api/qr') {
         auth(req, true);
         const ip = url.searchParams.get('ip');
@@ -370,7 +392,7 @@ export async function createApp({
         }
         const spec = fileSpec(await jsonBody(req), maxSize);
         const offer = { ...spec, id: randomUUID(), owner: user.key, device: user.device, secure: !!user.trustedFingerprint,
-          state: 'pending', received: 0, created: Date.now(), expires: Date.now() + ttl };
+          state: 'accepted', received: 0, created: Date.now(), expires: Date.now() + ttl };
         offers.set(offer.id, offer);
         json(res, 201, publicOffer(offer));
         return;
@@ -381,7 +403,7 @@ export async function createApp({
         if (!offer) throw fail(404, 'Запрос не найден.');
         if (!offerRoute[2]) {
           auth(req, true);
-          if (offer.state !== 'pending') throw fail(409, 'Запрос уже обработан или истёк.');
+          if (!['pending', 'accepted'].includes(offer.state)) throw fail(409, 'Запрос уже обработан или истёк.');
           const body = await jsonBody(req);
           if (!['accept', 'reject'].includes(body.action)) throw fail(400, 'Неизвестное действие.');
           offer.state = body.action === 'accept' ? 'accepted' : 'rejected';
@@ -390,7 +412,7 @@ export async function createApp({
         } else {
           const user = auth(req);
           if (offer.owner !== user.key) throw fail(403, 'Запрос принадлежит другому устройству.');
-          if (offer.state !== 'accepted') throw fail(409, 'Сначала получатель должен подтвердить приём.');
+          if (offer.state !== 'accepted') throw fail(409, 'Файл больше не доступен для приёма.');
           offer.state = 'uploading';
           try {
             offer.path = await receive(req, offer, inbox, bytes => { offer.received = bytes; });
@@ -412,13 +434,14 @@ export async function createApp({
         const recipient = recipientId === null ? undefined : [...connectedDevices].find(([, device]) => device.id === recipientId)?.[0];
         if (recipientId !== null && !recipient) throw fail(409, 'Устройство отключилось. Выберите получателя ещё раз.');
         const spec = fileSpec({ name: url.searchParams.get('name'), size: Number(url.searchParams.get('size')) }, maxSize);
+        const created = Date.now();
         const filePath = await receive(req, spec, outbox);
         prune();
         if (recipientId !== null && connectedDevices.get(recipient)?.id !== recipientId) {
           await rm(filePath, { force: true });
           throw fail(409, 'Устройство отключилось. Файл не опубликован; подключитесь и повторите отправку.');
         }
-        const share = { ...spec, id: randomUUID(), path: filePath, recipient, recipientName: recipient ? connectedDevices.get(recipient).name : undefined };
+        const share = { ...spec, id: randomUUID(), path: filePath, recipient, recipientName: recipient ? connectedDevices.get(recipient).name : undefined, created, state: 'ready' };
         shares.set(share.id, share);
         json(res, 201, publicShare(share));
         return;
@@ -445,7 +468,9 @@ export async function createApp({
           const info = await stat(share.path);
           res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': info.size,
             'Content-Disposition': `attachment; filename="download"; filename*=UTF-8''${encodeURIComponent(share.name).replace(/'/gu, '%27')}` });
-          await pipeline(createReadStream(share.path), res);
+          share.state = 'downloading';
+          try { await pipeline(createReadStream(share.path), res); share.state = 'completed'; share.completedAt = Date.now(); }
+          catch (error) { share.state = 'failed'; throw error; }
           if (ticket.countTransfer) await recordTransfer(randomUUID(), info.size);
           return;
         }
@@ -483,6 +508,12 @@ export async function createApp({
   }
   return {
     server, pin, adminToken, port: boundPort, inbox,
+    prepareUpdate() {
+      prune();
+      if (closing || active.size || transferRequests.size || [...offers.values()].some(offer => ['pending', 'accepted', 'uploading'].includes(offer.state))) return false;
+      preparingUpdate = true; return true;
+    },
+    cancelUpdate() { preparingUpdate = false; },
     urls: addresses.map(ip => `http://${ip}:${boundPort}`),
     adminUrl: `http://127.0.0.1:${boundPort}/#admin=${adminToken}`,
     async close() {

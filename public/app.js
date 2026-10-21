@@ -11,13 +11,48 @@ let rendered = '';
 let qrUrl = '';
 let addressSignature;
 let sending = false;
+window.nearbyUpdateBusy = () => sending || !state ||
+  state.offers.some(offer => ['pending', 'accepted', 'uploading'].includes(offer.state)) ||
+  document.querySelector('#shell-send')?.open === true;
 let peerMode = false;
+let connectionAvailable = false;
 let joinMode = false;
 let refreshing;
 let discoverySignature = '', discoveryRefreshing = false, diagnoseGeneration = 0;
 const selectedDiscoveryAddresses = new Map();
 let trustState = { enabled: false, devices: [], requests: [] }, discoveredDevices = [], trustSignature = '', trustRefreshing = false;
-const peerRoute = url => peerMode && (url === '/api/state' || url === '/api/offers' || /^\/api\/(?:offers|shares)\//.test(url)) ? '/api/peer/remote' + url : url;
+const incomingSeen = new Set(), automaticDownloads = new Map();
+const pairingSeen = new Set();
+let downloadedShares = new Set();
+try { downloadedShares = new Set(JSON.parse(sessionStorage.getItem('nearby-downloaded-shares') || '[]')); } catch {}
+let targets = [], selectedTargetId = '', selectionLost = false, previousDeviceCount = 0, deviceSignature = '', remoteState = null;
+const records = new Map(), hiddenRecords = new Set(), nativeFiles = new Set(), nativePending = new Map();
+let recordSequence = 0;
+try { for (const key of JSON.parse(sessionStorage.getItem('nearby-hidden-records') || '[]')) hiddenRecords.add(key); } catch {}
+const selectedTarget = () => targets.find(target => target.id === selectedTargetId);
+const targetPrefix = target => target?.kind === 'peer' ? '/api/peer/remote' : '';
+const nativeBridge = window.chrome?.webview;
+function registerNativeFile(id, index) {
+  if (!nativeBridge) return Promise.resolve(false);
+  return new Promise(resolve => {
+    const timer = setTimeout(() => { nativePending.delete(id); resolve(false); }, 5000);
+    nativePending.set(id, result => { clearTimeout(timer); resolve(result); });
+    nativeBridge.postMessage({ type: 'nearby-register-file', id, index });
+  });
+}
+nativeBridge?.addEventListener('message', event => {
+  const value = event.data;
+  if (value?.type === 'nearby-file-registered') { nativePending.get(value.id)?.(value.ok); nativePending.delete(value.id); if (value.ok) nativeFiles.add(value.id); }
+  if (value?.type === 'nearby-download-complete' && value.ok) { nativeFiles.add(value.id); rendered = ''; if (state) renderTransfers(); }
+});
+const confirmationControl = $('confirm-invitation');
+try { confirmationControl.checked = localStorage.getItem('nearby.confirm-invitation') === 'true'; } catch {}
+confirmationControl.addEventListener('change', () => { try { localStorage.setItem('nearby.confirm-invitation', String(confirmationControl.checked)); } catch {} if (!confirmationControl.checked) attemptAutoJoin(); });
+let autoJoinTried = false;
+function attemptAutoJoin() {
+  if (!authToken && !autoJoinTried && !confirmationControl.checked && /^[0-9]{6}$/.test(suggestedPin || '')) { autoJoinTried = true; $('join-form').requestSubmit(); }
+}
+
 
 function message(text) {
   $('message').textContent = text;
@@ -32,19 +67,19 @@ const sizes = bytes => {
   return `${n.toFixed(n < 10 ? 1 : 0)} ${units[i]}`;
 };
 const statusNames = {
-  pending: 'Ожидает подтверждения', accepted: 'Приём подтверждён',
+  pending: 'Подготовка приёма', accepted: 'Готов к приёму',
   uploading: 'Получение', completed: 'Получено и сохранено',
   rejected: 'Получатель отклонил файл', expired: 'Время ожидания истекло', failed: 'Передача прервана',
 };
 
-async function api(url, { method = 'GET', data, anonymous = false } = {}) {
+async function api(url, { method = 'GET', data, anonymous = false, target } = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 20_000);
   try {
-    const response = await fetch(peerRoute(url), {
+    const response = await fetch(url, {
       method, signal: controller.signal,
       headers: { ...(anonymous ? {} : { Authorization: `Bearer ${authToken}` }),
-        ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) },
+        ...(data === undefined ? {} : { 'Content-Type': 'application/json' }), ...(target?.kind === 'peer' ? { 'X-Nearby-Peer': target.id } : {}) },
       body: data === undefined ? undefined : JSON.stringify(data),
     });
     const body = await response.json();
@@ -96,14 +131,60 @@ async function updateQR() {
   qrUrl = url;
 }
 
+function renderDevices() {
+  if (!targets.some(target => target.id === selectedTargetId)) {
+    if (selectedTargetId) { selectedTargetId = ''; selectionLost = true; }
+    if (!selectionLost && targets.length === 1) selectedTargetId = targets[0].id;
+  }
+  window.NearbyWorkspace.setDevices(targets.length);
+  window.NearbyWorkspace.setConnected(connectionAvailable && targets.length > 0);
+  const signature = JSON.stringify([targets, selectedTargetId, sending]);
+  if (signature !== deviceSignature) {
+    deviceSignature = signature; $('device-list').replaceChildren();
+    for (const target of targets) {
+      const card = document.createElement('label'); card.className = 'device-target';
+      const radio = document.createElement('input'); radio.type = 'radio'; radio.name = 'send-target'; radio.value = target.id; radio.checked = target.id === selectedTargetId; radio.disabled = sending;
+      radio.addEventListener('change', () => { selectedTargetId = target.id; selectionLost = false; renderConnection(); });
+      const info = document.createElement('span'), name = document.createElement('strong'), transport = document.createElement('small');
+      name.textContent = target.name; name.className = 'device-name'; transport.textContent = target.secure ? 'TLS · защищённое соединение' : 'Локальная сеть'; info.append(name, transport); card.append(radio, info); $('device-list').append(card);
+    }
+  }
+  const target = selectedTarget();
+  $('recipient-name').textContent = target?.name || 'Устройство не выбрано'; $('devices-transfer').disabled = !target || sending;
+  $('files').disabled = !connectionAvailable || !target || sending; $('drop').classList.toggle('disabled', !target || sending);
+  $('select-remaining').hidden = Boolean(target) || targets.length !== 1;
+  if (!$('select-remaining').hidden) $('remaining-name').textContent = targets[0].name;
+  if (targets.length > previousDeviceCount && targets.length > 1 && !sending) window.NearbyWorkspace.selectTab('devices');
+  previousDeviceCount = targets.length;
+}
+function renderConnection() {
+  renderDevices();
+  const connected = connectionAvailable && targets.length > 0;
+  $('intro-title').firstChild.nodeValue = connected ? 'Можно передавать файлы' : 'Сначала подключимся';
+  $('intro-description').textContent = connected ? 'Выберите получателя и файлы. Приём начнётся автоматически.' : 'Подключите устройства один раз — передавайте без подтверждения каждого файла.';
+  $('transfer-workspace').hidden = !connected && records.size === 0;
+  $('connection-status').hidden = !connected;
+  if (connected) $('connection-status').textContent = `Подключено: ${targets.map(target => target.name).join(', ')}.`;
+}
+
+function showTrustedPanel() {
+  return (state?.admin || state?.localAdmin) && trustState.enabled && (trustState.devices.length > 0 || trustState.requests.length > 0);
+}
+
 function render() {
+  renderConnection();
   $('join').hidden = true; $('workspace').hidden = false;
-  $('connection').hidden = !state.admin || joinMode;
+  $('connection').hidden = !state.admin;
   $('received-location').hidden = !(state.admin || state.localAdmin) || !state.receivedDirectory;
-  $('pc-connect').hidden = !(state.admin || state.localAdmin) || (!peerMode && !joinMode);
-  $('pc-mode-switch').hidden = !state.admin || peerMode;
-  $('pc-show-invite').setAttribute('aria-pressed', String(!joinMode));
-  $('pc-show-connect').setAttribute('aria-pressed', String(joinMode));
+  $('pc-connect').hidden = !(state.admin || state.localAdmin);
+  $('connected-devices').replaceChildren();
+  const devices = targets;
+  for (const device of devices) {
+    const item = document.createElement('div'); item.className = 'connected-device';
+    item.textContent = `${device.name} · ${device.secure ? 'TLS' : 'Локальная сеть'}`;
+    $('connected-devices').append(item);
+  }
+  if (!devices.length) empty($('connected-devices'), 'Пока нет подключений.');
   $('pc-connect-form').hidden = peerMode;
   $('pc-connect-hint').hidden = peerMode;
   $('pc-connected').hidden = !peerMode;
@@ -111,17 +192,17 @@ function render() {
   $('pc-diagnose').hidden = peerMode;
   $('secure-pair').hidden = peerMode || !trustState.enabled;
   $('legacy-hint').hidden = peerMode;
-  $('trusted-panel').hidden = !(state.admin || state.localAdmin) || !trustState.enabled;
+  $('trusted-panel').hidden = !showTrustedPanel();
   $('pc-transport').textContent = state.peer?.secure ? 'Защищённое соединение · TLS 1.3 · ключ устройства проверен' : 'Подключение по PIN · HTTP · доверенная локальная сеть';
   $('pc-peer-address').textContent = state.peer?.origin || '';
   if (state.admin || state.localAdmin) $('received-path').textContent = state.receivedDirectory || '';
   if (state.admin) {
     $('shown-pin').textContent = state.pin;
-    $('send-title').textContent = 'Отдать файлы';
-    $('send-description').textContent = 'Добавьте файлы. Подключённые устройства смогут их скачать.';
-    $('receive-title').textContent = 'Входящие запросы';
-    $('receive-description').textContent = 'Подтвердите файлы, которые хотите получить.';
-    $('save-hint').textContent = 'Полученные файлы можно найти кнопкой «Открыть папку» в разделе «Входящие запросы».';
+    $('send-title').textContent = 'Отправка файлов';
+    $('send-description').textContent = 'Подключённые устройства начнут получение автоматически.';
+    $('receive-title').textContent = 'Получение файлов';
+    $('receive-description').textContent = 'Файлы сохраняются автоматически после подключения.';
+    $('save-hint').textContent = 'Принятые файлы — в папке Nearby.';
     $('received-path').textContent = state.receivedDirectory || '';
     const urlsSignature = JSON.stringify(state.urls);
     if (addressSignature !== urlsSignature) {
@@ -138,61 +219,104 @@ function render() {
     }
   } else {
     $('send-title').textContent = peerMode ? 'Отправить на другой ПК' : 'Отправить на компьютер';
-    $('send-description').textContent = 'Выберите файлы. Получатель подтвердит приём на своём компьютере.';
-    $('receive-title').textContent = 'Файлы для вас';
-    $('receive-description').textContent = 'Скачайте файлы, которыми поделился другой компьютер.';
-    $('save-hint').textContent = peerMode ? 'При отправке получатель нажимает «Принять» на другом ПК. При скачивании выберите, куда сохранить файл на этом ПК.' : 'Оставьте страницу открытой до завершения. Получатель увидит имя и размер каждого файла.';
+    $('send-description').textContent = 'Приём на другом компьютере начнётся автоматически.';
+    $('receive-title').textContent = 'Получение файлов';
+    $('receive-description').textContent = 'Получение начинается без дополнительного подтверждения.';
+    $('save-hint').textContent = 'Оставьте Nearby открытым до завершения передачи.';
   }
-  const signature = JSON.stringify([state.offers, state.shares]);
-  if (rendered === signature) return;
-  rendered = signature;
-  $('incoming').replaceChildren(); $('shared').replaceChildren(); $('history').replaceChildren();
-  const pending = state.admin ? state.offers.filter(x => x.state === 'pending') : [];
-  for (const offer of pending) {
-    const item = row(offer.name, `${sizes(offer.size)} · ${offer.device} · ${offer.secure ? 'TLS · доверенное устройство' : 'HTTP · PIN'}`);
-    const actions = document.createElement('div'); actions.className = 'actions';
-    for (const [label, action] of [['Принять', 'accept'], ['Нет', 'reject']]) {
-      actions.append(button(label, async () => {
-        await api(`/api/offers/${offer.id}`, { method: 'POST', data: { action } });
-        await refresh();
-      }, action === 'reject'));
-    }
-    item.element.append(actions); $('incoming').append(item.element);
-  }
-  if (state.admin && !pending.length) empty($('incoming'), 'Пока нет запросов. Отправьте файл со второго устройства.');
-  if (!state.admin && !state.shares.length) empty($('shared'), 'Здесь появятся файлы, которыми поделится компьютер.');
+  renderTransfers();
+}
+function keepRecord(key, data) {
+  if (hiddenRecords.has(key)) return null;
+  const previous = records.get(key) || { key, created: Date.now() };
+  Object.assign(previous, data); records.set(key, previous); return previous;
+}
+function renderTransfers() {
+  if (!state) return;
+  const queuedShares = new Set([...records.values()].filter(record => record.localSend && record.serverKind === 'share').map(record => record.serverId));
+  const queuedOffers = new Set([...records.values()].filter(record => record.localSend && record.serverKind === 'offer').map(record => record.serverId));
   for (const share of state.shares) {
-    const item = row(share.name, `${sizes(share.size)} · ${state.admin ? (share.recipientName ? `Только для «${share.recipientName}»` : 'Доступен подключённым устройствам') : 'Готов к скачиванию'}`);
-    item.element.append(button('Скачать', async () => {
-      const ticket = await api(`/api/shares/${share.id}/ticket`, { method: 'POST' });
-      const link = document.createElement('a'); link.href = ticket.url; link.download = share.name;
-      document.body.append(link); link.click(); link.remove();
-      message('Скачивание передано браузеру. Прогресс и сохранение файла доступны в его списке загрузок.');
-    }));
-    if (state.admin) item.element.append(button('Убрать', async () => {
-      await api(`/api/shares/${share.id}`, { method: 'DELETE' }); await refresh();
-    }, true));
-    $('shared').append(item.element);
-  }
-  if (!state.offers.length) empty($('history'), 'Пока тихо. Начните первую передачу.');
-  for (const offer of [...state.offers].reverse()) {
-    const item = row(offer.name, `${sizes(offer.size)} · ${statusNames[offer.state] || offer.state}${offer.error ? ` · ${offer.error}` : ''}`);
-    if (offer.state === 'uploading') {
-      const progress = document.createElement('progress'); progress.max = offer.size || 1; progress.value = offer.received;
-      progress.setAttribute('aria-label', `Получение ${offer.name}`); item.info.append(progress);
+    if (state.admin && queuedShares.has(share.id)) {
+      for (const record of records.values()) if (record.localSend && record.serverId === share.id) { record.status = share.state === 'completed' ? 'Передан получателю' : share.state === 'downloading' ? 'Получатель скачивает файл' : share.state === 'failed' ? 'Передача прервана' : 'Ожидаем получение устройством'; record.busy = share.state === 'downloading'; }
+      continue;
     }
-    $('history').append(item.element);
+    const record = keepRecord(`share:${share.id}`, { ...share, serverId: share.id, serverKind: 'share', direction: state.admin ? 'outgoing' : 'incoming', device: share.recipientName || (state.admin ? 'Подключённые устройства' : 'Компьютер'), status: state.admin ? share.state === 'completed' ? 'Передан получателю' : 'Ожидаем получение устройством' : downloadedShares.has(share.id) ? 'Загрузка началась автоматически' : 'Готов к получению', created: share.created || records.get(`share:${share.id}`)?.created || Date.now(), localStored: state.admin, busy: share.state === 'downloading' });
+    if (record && !state.admin) receiveShare(record);
   }
+  for (const offer of state.offers) {
+    if (!state.admin && queuedOffers.has(offer.id)) continue;
+    const key = `offer:${offer.id}`;
+    const record = keepRecord(key, { ...offer, serverId: offer.id, serverKind: 'offer', direction: state.admin ? 'incoming' : 'outgoing', status: statusNames[offer.state] || offer.state, localStored: state.admin && offer.state === 'completed', busy: ['pending','accepted','uploading'].includes(offer.state), failed: ['failed','rejected','expired'].includes(offer.state) });
+    if (record && !incomingSeen.has(key) && record.direction === 'incoming') { incomingSeen.add(key); window.NearbyWorkspace.incoming(); }
+  }
+  const peerTarget = targets.find(target => target.kind === 'peer');
+  if (remoteState && peerTarget) for (const share of remoteState.shares) {
+    const key = `peer-share:${peerTarget.id}:${share.id}`;
+    const record = keepRecord(key, { ...share, serverId: share.id, serverKind: 'share', direction: 'incoming', device: peerTarget.name, target: peerTarget, status: downloadedShares.has(share.id) ? 'Загрузка началась автоматически' : 'Готов к получению', created: share.created || records.get(key)?.created || Date.now() });
+    if (record) receiveShare(record);
+  }
+  if (remoteState && peerTarget) for (const offer of remoteState.offers) {
+    if ([...records.values()].some(record => record.localSend && record.serverKind === 'offer' && record.serverId === offer.id)) continue;
+    keepRecord(`peer-offer:${peerTarget.id}:${offer.id}`, { ...offer, serverId: offer.id, serverKind: 'offer', direction: 'outgoing', device: peerTarget.name, target: peerTarget, status: statusNames[offer.state] || offer.state, busy: ['pending','accepted','uploading'].includes(offer.state), failed: ['failed','rejected','expired'].includes(offer.state) });
+  }
+  for (const record of records.values()) { if (record.downloadError) record.status = record.downloadError; if (nativeFiles.has(record.serverId)) record.status = 'Получено и сохранено'; }
+  const signature = JSON.stringify([...records.values()].map(({ key, status, busy, failed, received, serverId, localStored }) => [key, status, busy, failed, received, serverId, localStored, nativeFiles.has(key), nativeFiles.has(serverId)]));
+  if (signature === rendered) return; rendered = signature;
+  $('queue').replaceChildren(); $('incoming').replaceChildren(); $('shared').replaceChildren();
+  for (const record of [...records.values()].reverse()) {
+    const element = document.createElement('tr'); element.className = 'file-row transfer'; element.dataset.record = record.key;
+    const name = document.createElement('td'), title = document.createElement('div'), device = document.createElement('div'); title.className = 'file-name transfer-title'; title.textContent = record.name; device.className = 'transfer-peer'; device.textContent = record.device || ''; name.append(title, device);
+    const size = document.createElement('td'); size.className = 'transfer-size'; size.textContent = sizes(record.size);
+    const date = document.createElement('td'), time = document.createElement('time'); time.dateTime = new Date(record.created).toISOString(); time.textContent = new Intl.DateTimeFormat('ru', { dateStyle: 'short', timeStyle: 'medium' }).format(record.created); date.append(time);
+    const status = document.createElement('td'), detail = document.createElement('div'); detail.className = 'file-meta transfer-detail'; detail.textContent = record.status; status.append(detail);
+    if (record.failed) element.classList.add('error');
+    if (record.busy) { const progress = document.createElement('progress'); progress.max = record.size || 1; progress.value = record.received || 0; status.append(progress); }
+    const actions = document.createElement('td'); actions.className = 'transfer-actions';
+    if (!record.busy && (!record.failed || record.serverKind === 'share') && (record.localStored || record.file || record.serverKind === 'share')) actions.append(button('Открыть', () => openRecord(record), true));
+    const remove = button('×', () => {
+      hiddenRecords.add(record.key);
+      if (record.serverId) { hiddenRecords.add(`${record.serverKind}:${record.serverId}`); if (record.target) { hiddenRecords.add(`peer-offer:${record.target.id}:${record.serverId}`); hiddenRecords.add(`peer-share:${record.target.id}:${record.serverId}`); } }
+      try { sessionStorage.setItem('nearby-hidden-records', JSON.stringify([...hiddenRecords].slice(-2000))); } catch {}
+      if (record.url) URL.revokeObjectURL(record.url); record.file = null; records.delete(record.key); rendered = ''; renderTransfers();
+    }, true); remove.classList.add('remove-transfer'); remove.setAttribute('aria-label', 'Удалить из списка'); remove.title = 'Удалить из списка'; remove.disabled = Boolean(record.busy); actions.append(remove);
+    element.append(name, size, date, status, actions);
+    $(record.direction === 'outgoing' ? 'queue' : record.target || !state.admin ? 'shared' : 'incoming').append(element);
+  }
+}
+function receiveShare(record) {
+  if (downloadedShares.has(record.serverId) || automaticDownloads.has(record.serverId)) return;
+  automaticDownloads.set(record.serverId, true);
+  void downloadShare(record).catch(error => { record.status = error.message; record.downloadError = error.message; record.failed = true; rendered = ''; renderTransfers(); });
+}
+async function downloadShare(record) {
+  const ticket = await api(targetPrefix(record.target) + `/api/shares/${record.serverId}/ticket`, { method: 'POST', target: record.target });
+  const link = document.createElement('a'); link.href = ticket.url + '&nearbyFile=' + encodeURIComponent(record.serverId); link.download = record.name; document.body.append(link); link.click(); link.remove();
+  downloadedShares.add(record.serverId); try { sessionStorage.setItem('nearby-downloaded-shares', JSON.stringify([...downloadedShares].slice(-200))); } catch {}
+  record.failed = false; record.downloadError = null; record.status = 'Загрузка началась автоматически'; window.NearbyWorkspace.incoming(); rendered = ''; renderTransfers();
+}
+async function openRecord(record) {
+  const nativeId = nativeFiles.has(record.key) ? record.key : nativeFiles.has(record.serverId) ? record.serverId : null;
+  if (nativeBridge && nativeId) { nativeBridge.postMessage({ type: 'nearby-open-file', id: nativeId }); return; }
+  if (record.localStored) { await api('/api/files/open', { method: 'POST', data: { kind: record.serverKind, id: record.serverId } }); return; }
+  if (record.file) {
+    record.url ||= URL.createObjectURL(record.file); const link = document.createElement('a'); link.href = record.url; link.download = record.name; link.click(); return;
+  }
+  await downloadShare(record);
 }
 
 async function refresh() {
   if (refreshing) return refreshing;
-  const mode = peerMode;
-  refreshing = api('/api/state').then(async result => {
-    if (mode !== peerMode) return;
-    if (result.admin && result.peerConnection && !peerMode) { peerMode = true; rendered = ''; result = await api('/api/state'); }
-    state = result; render();
-  }).finally(() => { refreshing = null; });
+  refreshing = (async () => {
+    const result = await api('/api/state'); state = result; peerMode = Boolean(result.peerConnection); remoteState = null;
+    if (result.admin) {
+      const responses = await Promise.allSettled([api('/api/send-targets'), peerMode ? api('/api/peer/remote/api/state', { target: { ...result.peerConnection, kind: 'peer' } }) : Promise.resolve(null)]);
+      targets = responses[0].status === 'fulfilled' ? responses[0].value.targets : [];
+      if (responses[1].status === 'fulfilled') remoteState = responses[1].value;
+      else message(responses[1].reason.message || 'Нет связи с другим ПК.');
+      state.peer = remoteState?.peer || result.peerConnection;
+    } else targets = [{ id: 'host', kind: 'host', name: 'Компьютер', maxSize: result.maxSize }];
+    connectionAvailable = true; render();
+  })().finally(() => { refreshing = null; });
   return refreshing;
 }
 
@@ -200,10 +324,11 @@ async function poll() {
   if (authToken) {
     try { await refresh(); if (state?.admin || state?.localAdmin) await refreshTrust(); if (state?.admin && !peerMode) await refreshDiscovery(); }
     catch (error) {
+      connectionAvailable = false; renderConnection();
       if (error.status === 401) {
         authToken = ''; sessionStorage.removeItem('nearby-token');
         $('workspace').hidden = true; $('join').hidden = false;
-        message(adminLink ? 'Откройте новую ссылку владельца из консоли приложения.' : 'Сеанс истёк или компьютер перезапущен. Введите новый PIN.');
+        message(adminLink ? 'Откройте новую ссылку владельца из консоли приложения.' : 'Сеанс истёк или компьютер перезапущен. Введите новый PIN.'); attemptAutoJoin();
       } else message(error.message || 'Нет связи с компьютером. Проверьте Wi-Fi.');
     }
   }
@@ -219,12 +344,13 @@ async function refreshDiscovery() {
     discoveredDevices = result.devices; renderTrust();
     const statuses = {
       starting: 'Запускаем поиск устройств…',
-      listening: result.devices.length ? 'Выберите компьютер и введите PIN из его окна Nearby.' : 'Пока ничего не найдено. Откройте Nearby на втором ПК или подключитесь по адресу.',
+      listening: result.devices.length ? `Найдено компьютеров: ${result.devices.length}. Выберите нужный.` : 'Откройте Nearby на другом компьютере в этой сети.',
       'no-network': 'Нет доступной локальной IPv4-сети. Подключите ПК к Wi-Fi или Ethernet; поиск обновится автоматически.',
       unavailable: result.errorCode === 'EADDRINUSE' ? 'Порт поиска занят. Подключитесь по адресу; поиск повторится автоматически.' : 'Поиск устройств недоступен. Проверьте сеть и разрешение Nearby в брандмауэре. Можно подключиться по адресу.',
       disabled: 'Автопоиск отключён в этом запуске. Подключитесь по адресу.',
     };
     $('discovery-state').textContent = statuses[result.status] || 'Не удалось получить состояние поиска.';
+    $('discovery-empty').hidden = result.devices.length > 0;
     $('discovery-name').textContent = result.name ? `Этот ПК виден в сети как «${result.name}». PIN и имена файлов в поиске не передаются.` : '';
     const signature = JSON.stringify(result.devices);
     if (signature === discoverySignature) return;
@@ -233,7 +359,11 @@ async function refreshDiscovery() {
     for (const id of selectedDiscoveryAddresses.keys()) if (!aliveIds.has(id)) selectedDiscoveryAddresses.delete(id);
     for (const device of result.devices) {
       const item = row(device.name, `Nearby ${device.version}`);
+      item.element.className = 'device-card';
+      item.element.setAttribute('role', 'group');
+      item.element.setAttribute('aria-label', device.name);
       item.element.dataset.deviceId = device.id;
+      item.element.querySelector('.file-icon').innerHTML = '<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><rect x="9" y="10" width="46" height="33" rx="4"/><path d="M24 54h16M32 43v11M16 35h32"/><circle cx="32" cy="38.5" r=".8" fill="currentColor" stroke="none"/></svg>';
       const addresses = document.createElement('select'); addresses.className = 'discovery-address';
       addresses.setAttribute('aria-label', `Адрес устройства ${device.name}`);
       const score = origin => new URL(origin).hostname.startsWith('192.168.') ? 0 : new URL(origin).hostname.startsWith('10.') ? 1 : 2;
@@ -241,10 +371,20 @@ async function refreshDiscovery() {
         const option = document.createElement('option'); option.value = origin; option.textContent = origin; addresses.append(option);
       }
       if (device.origins.includes(selectedDiscoveryAddresses.get(device.id))) addresses.value = selectedDiscoveryAddresses.get(device.id);
-      addresses.addEventListener('change', () => selectedDiscoveryAddresses.set(device.id, addresses.value));
-      item.info.append(addresses);
+      const ip = document.createElement('div'); ip.className = 'device-ip';
+      const updateIp = () => { ip.textContent = `IP ${new URL(addresses.value).hostname}`; };
+      updateIp();
+      addresses.addEventListener('change', () => { selectedDiscoveryAddresses.set(device.id, addresses.value); updateIp(); });
+      item.info.append(ip);
+      if (device.origins.length > 1) {
+        const alternative = document.createElement('details'); alternative.className = 'device-addresses';
+        const summary = document.createElement('summary'); summary.textContent = 'Другой сетевой адрес';
+        alternative.append(summary, addresses); item.info.append(alternative);
+      }
       const known = device.secure && trustState.devices.some(item => item.fingerprint === device.secure.fingerprint);
-      item.element.append(button(device.secure && trustState.enabled ? known ? 'Подключиться защищённо' : 'Сопрячь устройства' : 'Выбрать ПК', async () => {
+      const hint = document.createElement('div'); hint.className = 'device-hint';
+      hint.textContent = device.secure && trustState.enabled ? known ? 'Сохранённое устройство · без PIN' : 'Первое подключение · сверка на двух ПК' : 'Понадобится PIN с экрана этого ПК';
+      item.element.append(hint, button('Подключиться', async () => {
         if (sending || state?.offers.some(offer => offer.state === 'uploading')) { message('Дождитесь завершения текущей передачи.'); return; }
         const origin = addresses.value;
         if (device.secure && trustState.enabled) {
@@ -255,7 +395,7 @@ async function refreshDiscovery() {
         $('pc-address').value = origin; if (changed) $('pc-pin').value = '';
         joinMode = true; render(); $('pc-connect').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
         $('pc-pin').focus(); await diagnoseAddress();
-      }, true));
+      }));
       $('nearby-devices').append(item.element);
     }
   } catch { $('discovery-state').textContent = 'Не удалось обновить список. Подключитесь по адресу или повторите поиск.'; }
@@ -269,7 +409,11 @@ async function refreshTrust() {
   finally { trustRefreshing = false; }
 }
 function renderTrust() {
-  $('trusted-panel').hidden = !(state?.admin || state?.localAdmin) || !trustState.enabled;
+  $('trusted-panel').hidden = !showTrustedPanel();
+  const pairing = trustState.requests.filter(request => !request.rejected);
+  if (pairing.length) $('saved-devices').open = true;
+  if (pairing.some(request => !pairingSeen.has(request.id))) window.NearbyWorkspace.selectTab('connection');
+  for (const request of pairing) pairingSeen.add(request.id);
   if (!trustState.enabled) return;
   const signature = JSON.stringify([trustState, discoveredDevices]);
   if (signature === trustSignature) return;
@@ -289,7 +433,7 @@ function renderTrust() {
     if (!request.rejected) actions.append(button('Отклонить сопряжение', async () => { await api('/api/trust/reject', { method: 'POST', data: { id: request.id } }); await refreshTrust(); }, true));
     card.append(title, instruction, code, detail, actions); $('pairing-requests').append(card);
   }
-  if (!trustState.devices.length) empty($('trusted-devices'), 'Пока нет сохранённых устройств. Выберите ПК в «Устройства рядом» и нажмите «Сопрячь устройства».');
+  if (!trustState.devices.length) empty($('trusted-devices'), 'После подтверждения на обоих ПК устройство появится здесь.');
   for (const device of trustState.devices) {
     const found = discoveredDevices.find(item => item.secure?.fingerprint === device.fingerprint);
     const item = row(device.name, `Ключ ${device.fingerprint.slice(0, 16)}… · ${found ? 'Найден в сети' : 'Адрес последнего подключения'}`);
@@ -322,8 +466,8 @@ async function connectTrusted(fingerprint, address) {
   if (sending || peerMode) { message('Сначала завершите текущее подключение.'); return; }
   if (refreshing) await refreshing.catch(() => {});
   const result = await api('/api/peer/connect', { method: 'POST', data: { fingerprint, address } });
-  peerMode = true; state = result; rendered = ''; $('queue').replaceChildren();
-  message('Устройства соединены с проверкой ключей и шифрованием.'); render();
+  peerMode = true; rendered = ''; await refresh();
+  message('Устройства соединены с проверкой ключей и шифрованием.');
 }
 $('secure-pair').addEventListener('click', async () => {
   $('secure-pair').disabled = true;
@@ -351,11 +495,12 @@ $('discovery-refresh').addEventListener('click', async () => {
   finally { $('discovery-refresh').disabled = false; }
 });
 
-function upload(url, file, onProgress) {
+function upload(url, file, onProgress, target) {
   return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest(); xhr.open('POST', peerRoute(url));
+    const xhr = new XMLHttpRequest(); xhr.open('POST', url);
     xhr.setRequestHeader('Authorization', `Bearer ${authToken}`);
     xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    if (target?.kind === 'peer') xhr.setRequestHeader('X-Nearby-Peer', target.id);
     xhr.upload.onprogress = event => onProgress(event.loaded);
     xhr.onerror = () => reject(new Error('Передача прервана. Проверьте Wi-Fi и отправьте файл заново.'));
     xhr.onabort = () => reject(new Error('Передача отменена.'));
@@ -370,52 +515,40 @@ function upload(url, file, onProgress) {
 }
 
 async function sendFiles(files) {
-  if (!state || sending || !files.length) return;
-  sending = true; $('files').disabled = true; $('drop').classList.add('disabled');
+  const target = selectedTarget();
+  if (!state || !connectionAvailable || !target || sending || !files.length) return;
+  sending = true; renderConnection();
   try {
-    for (const file of files) {
-      const item = row(file.name, `${sizes(file.size)} · Подготовка`);
-      const progress = document.createElement('progress'); progress.max = file.size || 1; progress.value = 0;
-      progress.setAttribute('aria-label', `Отправка ${file.name}`); item.info.append(progress); $('queue').append(item.element);
+    for (const [index, file] of files.entries()) {
+      if (!targets.some(current => current.id === target.id && current.kind === target.kind)) break;
+      const key = `local-${Date.now()}-${++recordSequence}`;
+      const record = keepRecord(key, { name: file.name, size: file.size, direction: 'outgoing', device: target.name, target, file, localSend: true, busy: true, status: 'Подготовка', received: 0 });
+      rendered = ''; renderTransfers();
       try {
-        if (file.size > state.maxSize) throw new Error(`Максимальный размер файла: ${sizes(state.maxSize)}.`);
+        await registerNativeFile(key, index);
+        if (file.size > target.maxSize) throw new Error(`Максимальный размер файла: ${sizes(target.maxSize)}.`);
         let url;
-        if (state.admin) {
-          url = `/api/shares?name=${encodeURIComponent(file.name)}&size=${file.size}`;
+        if (target.kind === 'client') {
+          record.serverKind = 'share'; url = `/api/shares?recipient=${encodeURIComponent(target.id)}&name=${encodeURIComponent(file.name)}&size=${file.size}`;
         } else {
-          const offer = await api('/api/offers', { method: 'POST', data: { name: file.name, size: file.size } });
-          item.detail.textContent = `${sizes(file.size)} · Ожидаем подтверждения на компьютере`;
+          record.serverKind = 'offer';
+          const offer = await api(targetPrefix(target) + '/api/offers', { method: 'POST', data: { name: file.name, size: file.size }, target }); record.serverId = offer.id; records.delete(`peer-offer:${target.id}:${offer.id}`); records.delete('offer:' + offer.id);
           const deadline = Date.now() + 5 * 60_000;
-          let accepted = false;
-          while (Date.now() < deadline) {
-            const current = await api('/api/state');
-            const status = current.offers.find(x => x.id === offer.id)?.state;
-            if (status === 'accepted') { accepted = true; break; }
-            if (status !== 'pending') throw new Error(statusNames[status] || 'Запрос больше не доступен.');
-            await pause(1500);
+          let accepted = offer.state === 'accepted';
+          while (!accepted && Date.now() < deadline) {
+            const current = await api(targetPrefix(target) + '/api/state', { target }); const status = current.offers.find(item => item.id === offer.id)?.state;
+            if (status === 'accepted') accepted = true; else if (status !== 'pending') throw new Error(statusNames[status] || 'Запрос больше не доступен.'); else await pause(1000);
           }
           if (!accepted) throw new Error('Время ожидания истекло. Отправьте файл заново.');
-          url = `/api/offers/${offer.id}/upload`;
+          url = targetPrefix(target) + `/api/offers/${offer.id}/upload`;
         }
-        const start = Date.now();
         let lastUpdate = 0;
-        await upload(url, file, bytes => {
-          if (Date.now() - lastUpdate < 200 && bytes < file.size) return;
-          lastUpdate = Date.now(); progress.value = bytes;
-          const rate = bytes / Math.max((Date.now() - start) / 1000, .1);
-          item.detail.textContent = bytes >= file.size ? 'Проверяем сохранение на компьютере…' : `${sizes(bytes)} / ${sizes(file.size)} · ${sizes(rate)}/с`;
-        });
-        progress.value = progress.max;
-        item.detail.textContent = state.admin ? 'Готов к скачиванию на втором устройстве' : 'Получено и сохранено на компьютере';
-        await refresh();
-      } catch (error) {
-        item.detail.textContent = error.message || 'Соединение прервано.';
-        progress.remove();
-      }
+        const uploaded = await upload(url, file, bytes => { if (Date.now() - lastUpdate < 200 && bytes < file.size) return; lastUpdate = Date.now(); record.received = bytes; record.status = bytes >= file.size ? 'Проверяем сохранение на компьютере…' : `Отправляем: ${sizes(bytes)} / ${sizes(file.size)}`; rendered = ''; renderTransfers(); }, target);
+        record.serverId = uploaded.id; if (target.kind === 'client') records.delete('share:' + uploaded.id); record.localStored = target.kind === 'client'; record.busy = false; record.status = target.kind === 'client' ? 'Ожидаем получение устройством' : 'Получено и сохранено на компьютере';
+        rendered = ''; await refresh();
+      } catch (error) { record.busy = false; record.failed = true; record.status = error.message || 'Соединение прервано.'; rendered = ''; renderTransfers(); break; }
     }
-  } finally {
-    sending = false; $('files').disabled = false; $('drop').classList.remove('disabled'); $('files').value = '';
-  }
+  } finally { sending = false; $('files').value = ''; renderConnection(); rendered = ''; renderTransfers(); }
 }
 
 $('join-form').addEventListener('submit', async event => {
@@ -438,7 +571,7 @@ $('pc-connect-form').addEventListener('submit', async event => {
   try {
     if (refreshing) await refreshing.catch(() => {});
     const result = await api('/api/peer/connect', { method: 'POST', data: { address: $('pc-address').value.trim(), pin: $('pc-pin').value, device: $('pc-device').value.trim() } });
-    peerMode = true; state = result; rendered = ''; $('queue').replaceChildren(); message('ПК соединены. Можно передавать файлы в обе стороны.'); render();
+    peerMode = true; rendered = ''; await refresh(); message('ПК соединены. Можно передавать файлы в обе стороны.');
   } catch (error) { message(error.message || 'Не удалось подключиться к другому ПК.'); }
   finally { submit.disabled = false; }
 });
@@ -448,7 +581,7 @@ $('pc-disconnect').addEventListener('click', async () => {
   try {
     if (refreshing) await refreshing.catch(() => {});
     await api('/api/peer/disconnect', { method: 'POST', data: {} });
-    peerMode = false; joinMode = false; rendered = ''; $('queue').replaceChildren(); message('Подключение к другому ПК завершено.'); await refresh();
+    peerMode = false; joinMode = false; rendered = ''; message('Подключение к другому ПК завершено.'); await refresh();
   } catch (error) { message(error.message); }
   finally { $('pc-disconnect').disabled = false; }
 });
@@ -457,8 +590,18 @@ $('copy-address').addEventListener('click', async () => {
   try { await navigator.clipboard.writeText($('share-address').value); message('Ссылка с PIN скопирована. Вставьте её в Nearby на другом ПК.'); }
   catch { $('share-address').focus(); $('share-address').select(); message('Ссылка выделена. Нажмите Ctrl+C, чтобы скопировать.'); }
 });
-$('pc-show-invite').addEventListener('click', () => { joinMode = false; render(); });
-$('pc-show-connect').addEventListener('click', () => { joinMode = true; render(); $('pc-address').focus(); });
+$('connection-mode').addEventListener('change', () => {
+  const internet = $('connection-mode').value === 'internet';
+  $('desktop-lan').hidden = internet; $('internet-option').hidden = !internet;
+});
+document.addEventListener('nearby-shell-transfer', event => {
+  const { file, uploaded, target } = event.detail;
+  const key = `shell:${target.id}:${uploaded.id}`;
+  if (target.kind === 'client') records.delete('share:' + uploaded.id); else records.delete(`peer-offer:${target.id}:${uploaded.id}`);
+  keepRecord(key, { name: file.name, size: file.size, file, direction: 'outgoing', localSend: true, localStored: target.kind === 'client', serverKind: target.kind === 'client' ? 'share' : 'offer', serverId: uploaded.id, device: target.name, target, busy: false, status: target.kind === 'client' ? 'Ожидаем получение устройством' : 'Получено и сохранено на компьютере' }); rendered = ''; renderTransfers();
+});
+$('devices-transfer').onclick = () => window.NearbyWorkspace.selectTab('transfer');
+$('select-remaining').onclick = () => { if (targets.length === 1 && !sending) { selectedTargetId = targets[0].id; selectionLost = false; renderConnection(); } };
 $('files').addEventListener('change', event => sendFiles(Array.from(event.target.files)));
 $('address').addEventListener('change', () => updateQR().catch(error => message(error.message)));
 $('open-received').addEventListener('click', async () => {
@@ -484,4 +627,4 @@ window.addEventListener('hashchange', () => {
 });
 if (suggestedPin && /^[0-9]{6}$/u.test(suggestedPin)) $('pin').value = suggestedPin;
 $('join').hidden = Boolean(authToken);
-poll();
+attemptAutoJoin(); poll();

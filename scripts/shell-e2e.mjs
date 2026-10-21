@@ -28,7 +28,7 @@ try {
   for (const name of ['Телефон А', 'Телефон Б']) {
     const { token } = await call(sender, '/api/join', { pin: sender.pin, device: name }, '');
     const context = await browser.newContext(); await context.addInitScript(value => sessionStorage.setItem('nearby-token', value), token);
-    const guest = await context.newPage(); guest.on('pageerror', error => errors.push(error.message)); await guest.goto(`http://127.0.0.1:${sender.port}/`); await guest.locator('#workspace').waitFor(); guestPages.push({ guest, token });
+    const guest = await context.newPage(); guest.on('pageerror', error => errors.push(error.message)); await guest.goto(`http://127.0.0.1:${sender.port}/`); await guest.locator('#transfer-workspace').waitFor(); guestPages.push({ guest, token });
   }
   await page.locator('#shell-reopen').click(); await page.waitForFunction(() => document.querySelector('#shell-target').options.length === 3);
   const chosen = (await call(sender, '/api/send-targets')).targets.find(item => item.name === 'Телефон А');
@@ -48,22 +48,28 @@ try {
   await stage([source, empty]); await page.waitForFunction(() => document.querySelector('#shell-target').options.length === 4);
   const peer = (await call(sender, '/api/send-targets')).targets.find(item => item.kind === 'peer');
   await page.locator('#shell-target').selectOption(peer.id); await page.locator('#shell-start').click();
-  await receiverPage.locator('#incoming').getByRole('button', { name: 'Принять', exact: true }).click();
-  await receiverPage.locator('#incoming').getByRole('button', { name: 'Нет', exact: true }).click();
-  await page.waitForFunction(() => [...document.querySelectorAll('.shell-file small')].some(item => item.textContent.includes('отклонил')));
-  const files = await readdir(receiver.inbox); assert.equal(files.length, 1); assert.equal(hash(await readFile(path.join(receiver.inbox, files[0]))), hash(bytes));
+  await page.waitForFunction(() => [...document.querySelectorAll('.shell-file small')].every(item => item.textContent.includes('Получено и сохранено')));
+  const files = await readdir(receiver.inbox); assert.equal(files.length, 2);
+  assert.ok((await Promise.all(files.map(name => readFile(path.join(receiver.inbox, name))))).some(data => hash(data) === hash(bytes)));
+  assert.equal(await receiverPage.getByRole('button', { name: 'Принять', exact: true }).count(), 0);
   await page.setViewportSize({ width: 390, height: 844 });
   assert.ok(await page.evaluate(() => document.querySelector('#shell-send').scrollWidth <= document.querySelector('#shell-send').clientWidth));
   await page.locator('#shell-send').screenshot({ path: 'artifacts/nearby-shell-target-picker-mobile.png' });
   await page.locator('#shell-clear').click(); await stage([empty]);
+  let releaseOffer;
+  let confirmOffer;
+  const offerIntercepted = new Promise(resolve => { confirmOffer = resolve; });
+  const delayedOffer = new Promise(resolve => { releaseOffer = resolve; });
+  await page.route('**/api/peer/remote/api/offers', async route => { confirmOffer(); await delayedOffer; await route.continue().catch(() => {}); });
   await page.locator('#shell-start').click();
-  await page.waitForFunction(() => document.querySelector('.shell-file small')?.textContent.includes('Ожидаем подтверждение'));
+  await offerIntercepted;
   await page.locator('#shell-cancel').click();
   await page.waitForFunction(() => document.querySelector('.shell-file small')?.textContent.includes('Отправка остановлена'));
+  releaseOffer(); await page.unroute('**/api/peer/remote/api/offers');
   await call(sender, '/api/peer/disconnect', {});
   await call(sender, '/api/peer/connect', { address: `http://127.0.0.1:${receiver.port}`, pin: receiver.pin, device: 'ПК отправителя' });
   await page.waitForFunction(() => document.getElementById('shell-target').value === '' && document.getElementById('shell-start').disabled);
   assert.deepEqual(errors, []);
-  await writeFile('artifacts/Nearby-shell-ui-verification.json', JSON.stringify({ passed: true, retainedSelectionBeforeConnecting: true, simultaneousRecipients: 3, targetedPhoneShares: 2, unrelatedPhoneCannotSeeFiles: true, peerTransferSHA256: true, rejection: true, cancellation: true, reconnectDoesNotReplaceSelectedRecipient: true, widths: [1180,390], physicalDevices: false, checkedAt: new Date().toISOString() }, null, 2));
-  console.log('Explorer-send UI passed: retained selection, recipient choice, private binary/empty shares, PC transfer SHA-256 and refusal.');
+  await writeFile('artifacts/Nearby-shell-ui-verification.json', JSON.stringify({ passed: true, retainedSelectionBeforeConnecting: true, simultaneousRecipients: 3, targetedPhoneShares: 2, unrelatedPhoneCannotSeeFiles: true, peerTransferSHA256: true, automaticReceiving: true, cancellation: true, reconnectDoesNotReplaceSelectedRecipient: true, widths: [1180,390], physicalDevices: false, checkedAt: new Date().toISOString() }, null, 2));
+  console.log('Explorer-send UI passed: retained selection, recipient choice, private binary/empty shares, automatic PC receiving with SHA-256 and cancellation.');
 } finally { await browser?.close(); await Promise.all([sender?.close(), receiver?.close()]); await rm(directory, { recursive: true, force: true }); }
