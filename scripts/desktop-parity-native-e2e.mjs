@@ -7,6 +7,7 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import net from 'node:net';
 import assert from 'node:assert/strict';
+import { checkFilePresentation } from './check-file-presentation.mjs';
 const directory = await mkdtemp(path.join(tmpdir(), 'nearby-file-actions-native-'));
 const port = await new Promise(resolve => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); });
 const stage = path.resolve('dist/windows-x64'), harness = path.join(stage, 'DesktopParityNativeHarness.exe');
@@ -29,6 +30,10 @@ try {
   for (let i=0;i<50;i++) { try { if ((await readFile(path.join(directory,'opened.txt'),'utf8')).includes(selected)) break; } catch {} await new Promise(resolve=>setTimeout(resolve,100)); }
   assert.equal((await readFile(path.join(directory,'opened.txt'),'utf8')).trim(), selected);
   await page.evaluate(()=>window.chrome.webview.postMessage({type:'nearby-open-file',id:'C:\\Windows\\not-a-selected-file.txt'})); await page.waitForTimeout(200); assert.equal((await readFile(path.join(directory,'opened.txt'),'utf8')).trim(),selected);
+  const image=Buffer.from(await page.evaluate(()=>{const canvas=document.createElement('canvas');canvas.width=120;canvas.height=80;const context=canvas.getContext('2d');context.fillStyle='#00865c';context.fillRect(0,0,120,80);context.fillStyle='#fff';context.fillRect(20,20,80,40);return canvas.toDataURL('image/webp').split(',')[1];}),'base64');
+  const selectedImage=path.join(directory,'selected-image.webp');await writeFile(selectedImage,image);await page.waitForFunction(()=>!document.querySelector('#files').disabled);
+  const imageDownload=guest.waitForEvent('download');await cdp.send('DOM.setFileInputFiles',{nodeId:node.nodeId,files:[selectedImage]});await imageDownload;
+  await checkFilePresentation(page,page.locator('#queue .file-row').filter({hasText:'selected-image.webp'}),{image:true});
   remote = await createApp({host:'127.0.0.1',port:0,storage:path.join(directory,'remote'),statistics:false,trustedLan:false,discovery:false}); const remoteOrigin=`http://127.0.0.1:${remote.port}`;
   await page.locator('#tab-connection').click(); await page.locator('#pc-address').fill(remoteOrigin+'/#pin='+remote.pin); await page.locator('#pc-connect-submit').click(); await page.locator('#tab-devices').waitFor();
   const targets = await (await fetch(remoteOrigin+'/api/send-targets',{headers:{Authorization:`Bearer ${remote.adminToken}`}})).json();
@@ -38,7 +43,16 @@ try {
   let lines=[]; for(let i=0;i<50;i++){lines=(await readFile(path.join(directory,'opened.txt'),'utf8')).trim().split('\n');if(lines.length===2)break;await new Promise(resolve=>setTimeout(resolve,100));}
   assert.equal(lines.length,2); assert.ok(path.resolve(lines[1]).startsWith(path.join(directory,'received')+path.sep)); assert.equal(await readFile(lines[1],'utf8'),body.toString());
   await received.getByRole('button',{name:'Удалить из списка'}).click(); await page.waitForTimeout(1800); assert.equal(await received.count(),0); assert.equal(await readFile(lines[1],'utf8'),body.toString());
-  assert.deepEqual(errors,[]); const result={passed:true,realWinFormsWebView2:true,selectedOriginalPath:true,automaticDownloadMappedToFile:true,opensSavedFile:true,unknownPathsRejected:true,historyRemovalPreservesFile:true,errors};await writeFile('artifacts/desktop-native-parity-verification.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result));
+  const imageSent=await fetch(remoteOrigin+`/api/shares?recipient=${targets.targets[0].id}&name=from-peer.webp&size=${image.length}`,{method:'POST',headers:{Authorization:`Bearer ${remote.adminToken}`},body:image});const imageShare=await imageSent.json();assert.equal(imageSent.status,201);
+  await page.waitForFunction(id=>nativeFiles.has(id),imageShare.id);await page.locator('#tab-transfer').click();
+  const imageReceived=page.locator('#shared .file-row').filter({hasText:'from-peer.webp'});await checkFilePresentation(page,imageReceived,{image:true});
+  await imageReceived.locator('.transfer-status-button').click();await page.evaluate(()=>{rendered='';renderTransfers();});
+  assert.ok(await page.getByRole('tooltip').isVisible(),'polling must retain the open status tooltip');
+  assert.ok(await imageReceived.locator('.transfer-status-button').evaluate(button=>button===document.activeElement),'polling must retain keyboard focus');
+  await page.screenshot({path:'artifacts/preview-status-native.png'});await page.keyboard.press('Escape');
+  await page.evaluate(()=>window.chrome.webview.postMessage({type:'nearby-file-preview',id:'unregistered-file'}));
+  await page.waitForFunction(()=>window.testNativeMessages.some(m=>m.type==='nearby-file-preview'&&m.id==='unregistered-file'&&m.base64===null));
+  assert.deepEqual(errors,[]); const result={passed:true,realWinFormsWebView2:true,selectedOriginalPath:true,automaticDownloadMappedToFile:true,opensSavedFile:true,unknownPathsRejected:true,historyRemovalPreservesFile:true,originalAndReceivedWebpThumbnails:true,statusHoverClickKeyboard:true,unknownPreviewPathsRejected:true,errors};await writeFile('artifacts/desktop-native-parity-verification.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result));
 } finally {
   if(native?.stdin.writable)native.stdin.end('stop\n'); if(native&&native.exitCode===null){const timer=setTimeout(()=>native.kill(),10000);await exited;clearTimeout(timer);}
   await browser?.close().catch(()=>{}); await guestBrowser?.close(); await remote?.close();

@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, readFile, rename, rm, stat, statfs } from 'node:fs/promises';
+import { mkdir, open, readFile, rename, rm, stat, statfs } from 'node:fs/promises';
 import { networkInterfaces } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -211,6 +211,8 @@ export async function createApp({
   const staticFiles = new Map([
     ['/', ['index.html', 'text/html; charset=utf-8']],
     ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
+    ['/file-presentation.js', ['file-presentation.js', 'text/javascript; charset=utf-8']],
+    ['/file-presentation.css', ['file-presentation.css', 'text/css; charset=utf-8']],
     ['/shell-send.js', ['shell-send.js', 'text/javascript; charset=utf-8']],
     ['/shell-send.css', ['shell-send.css', 'text/css; charset=utf-8']],
     ['/statistics.js', ['statistics.js', 'text/javascript; charset=utf-8']],
@@ -225,7 +227,7 @@ export async function createApp({
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+    res.setHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' data: blob:; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
     try {
       const url = new URL(req.url, `http://127.0.0.1:${boundPort}`);
       updateAddresses();
@@ -364,6 +366,26 @@ export async function createApp({
         auth(req, true);
         await openReceivedFolder(inbox);
         json(res, 200, { ok: true });
+        return;
+      }
+      if (req.method === 'GET' && url.pathname === '/api/files/preview') {
+        const user = auth(req);
+        const kind = url.searchParams.get('kind'), id = url.searchParams.get('id');
+        const file = kind === 'offer' ? offers.get(id) : kind === 'share' ? shares.get(id) : null;
+        if (file && !user.admin && (kind === 'offer' ? file.owner !== user.key : file.recipient && file.recipient !== user.key)) throw fail(404, 'Файл не найден.');
+        if (!file?.path || (kind === 'offer' && file.state !== 'completed')) throw fail(404, 'Файл не найден или ещё не принят.');
+        const types = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.avif': 'image/avif', '.bmp': 'image/bmp' };
+        const type = types[path.extname(file.name).toLowerCase()], limit = 8 * 1024 * 1024;
+        if (!type || !file.size || file.size > limit) throw fail(415, 'Превью недоступно для этого файла.');
+        const handle = await open(file.path, 'r');
+        try {
+          const info = await handle.stat();
+          if (!info.isFile() || info.size !== file.size || info.size > limit) throw fail(415, 'Превью недоступно для этого файла.');
+          // Bound allocation and reads even if a local file grows during this request.
+          const bytes = Buffer.alloc(info.size); let offset = 0;
+          while (offset < bytes.length) { const result = await handle.read(bytes, offset, bytes.length - offset, offset); if (!result.bytesRead) throw fail(404, 'Файл был изменён.'); offset += result.bytesRead; }
+          res.writeHead(200, { 'Content-Type': type, 'Content-Length': bytes.length }); res.end(bytes);
+        } finally { await handle.close(); }
         return;
       }
       if (req.method === 'POST' && url.pathname === '/api/files/open') {

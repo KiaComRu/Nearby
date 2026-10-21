@@ -1,6 +1,6 @@
 {
   "name": "nearby-transfer",
-  "version": "0.5.7",
+  "version": "0.5.8",
   "private": true,
   "description": "Nearby — передача файлов по локальной сети и через интернет",
   "type": "module",

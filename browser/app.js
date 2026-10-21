@@ -238,15 +238,18 @@ function rowFor(connection, spec, direction) {
   const progress = document.createElement('progress'); progress.max = spec.size || 1; progress.value = 0; progress.setAttribute('aria-label', 'Прогресс передачи');
   const actions = document.createElement('td'); actions.className = 'transfer-actions';
   const peerName = document.createElement('div'); peerName.className = 'transfer-peer'; peerName.textContent = displayName(connection);
-  const name = document.createElement('td'), state = document.createElement('td'); name.append(title, peerName); state.append(detail, progress);
+  const preview = window.NearbyFilePresentation.preview(spec.name);
+  const name = document.createElement('td'), file = document.createElement('div'), info = document.createElement('div');
+  file.className = 'transfer-file'; info.className = 'transfer-file-info'; info.append(title, peerName, progress); file.append(preview.element, info); name.append(file);
+  const state = window.NearbyFilePresentation.status(detail);
   element.append(name, size, date, state, actions); $(direction === 'incoming' ? 'transfers' : 'outgoing-transfers').prepend(element);
-  const row = { element, detail, progress, actions, id: spec.id, name: spec.name, size: spec.size, done: false, direction, connection }; rows.set(rowKey(connection, spec.id), row); return row;
+  const row = { element, detail, progress, actions, preview, id: spec.id, name: spec.name, size: spec.size, done: false, direction, connection }; rows.set(rowKey(connection, spec.id), row); return row;
 }
 function deleteButton(row) {
   const remove = button('×', () => {
     if (!row.done) return;
     if (row.url) { URL.revokeObjectURL(row.url); objectUrls.delete(row.url); row.url = null; }
-    row.releaseMemory?.(); row.sourceFile = null; row.fileHandle = null;
+    row.releaseMemory?.(); row.preview.dispose(); window.NearbyFilePresentation.closeStatus(); row.sourceFile = null; row.fileHandle = null;
     row.element.remove(); rows.delete(rowKey(row.connection, row.id));
     $('empty').hidden = $('transfers').children.length > 0;
   });
@@ -254,6 +257,7 @@ function deleteButton(row) {
 }
 function fileActions(row, blob) {
   if (!rows.has(rowKey(row.connection, row.id))) return;
+  void row.preview.load(blob);
   // Only passive formats get a preview MIME type. HTML/SVG and other active
   // content remain downloads and cannot run scripts in Nearby's origin.
   const types = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif', bmp: 'image/bmp', pdf: 'application/pdf', txt: 'text/plain', csv: 'text/plain', json: 'text/plain', mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', mp4: 'video/mp4', webm: 'video/webm' };
@@ -326,7 +330,7 @@ async function sendFiles(files) {
       const id = crypto.randomUUID();
       try {
         validateFileSpec({ id, name: file.name, size: file.size }, fileLink.peerLimit);
-        const row = rowFor(connection, { id, name: file.name, size: file.size }, 'outgoing'); row.sourceFile = file; cancelButton(fileLink, id, row.actions);
+        const row = rowFor(connection, { id, name: file.name, size: file.size }, 'outgoing'); row.sourceFile = file; void row.preview.load(file); cancelButton(fileLink, id, row.actions);
         await fileLink.sendFile(file, id);
       } catch (error) { if (!rows.has(rowKey(connection, id))) notice(`${file.name}: ${error.message}`, true); }
     }
@@ -360,6 +364,7 @@ window.addEventListener('beforeunload', event => { if (sending || Array.from(row
 window.addEventListener('pagehide', () => {
   appClosed = true; clearTimeout(idExpiryTimer);
   for (const connection of connections.values()) connection.stop('Соединение закрыто.', true);
+  for (const row of rows.values()) row.preview.dispose();
   for (const url of objectUrls) URL.revokeObjectURL(url);
 });
 window.addEventListener('hashchange', () => {

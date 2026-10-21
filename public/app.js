@@ -26,7 +26,7 @@ const pairingSeen = new Set();
 let downloadedShares = new Set();
 try { downloadedShares = new Set(JSON.parse(sessionStorage.getItem('nearby-downloaded-shares') || '[]')); } catch {}
 let targets = [], selectedTargetId = '', selectionLost = false, previousDeviceCount = 0, deviceSignature = '', remoteState = null;
-const records = new Map(), hiddenRecords = new Set(), nativeFiles = new Set(), nativePending = new Map();
+const records = new Map(), hiddenRecords = new Set(), nativeFiles = new Set(), nativePending = new Map(), nativePreviewPending = new Map();
 let recordSequence = 0;
 try { for (const key of JSON.parse(sessionStorage.getItem('nearby-hidden-records') || '[]')) hiddenRecords.add(key); } catch {}
 const selectedTarget = () => targets.find(target => target.id === selectedTargetId);
@@ -44,7 +44,32 @@ nativeBridge?.addEventListener('message', event => {
   const value = event.data;
   if (value?.type === 'nearby-file-registered') { nativePending.get(value.id)?.(value.ok); nativePending.delete(value.id); if (value.ok) nativeFiles.add(value.id); }
   if (value?.type === 'nearby-download-complete' && value.ok) { nativeFiles.add(value.id); rendered = ''; if (state) renderTransfers(); }
+  if (value?.type === 'nearby-file-preview') { nativePreviewPending.get(value.id)?.(value); nativePreviewPending.delete(value.id); }
 });
+function nativePreview(id) {
+  return new Promise(resolve => {
+    const timer = setTimeout(() => { nativePreviewPending.delete(id); resolve(null); }, 10_000);
+    nativePreviewPending.set(id, value => {
+      clearTimeout(timer);
+      if (!value.base64 || value.base64.length > 12 * 1024 * 1024) { resolve(null); return; }
+      try { const bytes = Uint8Array.from(atob(value.base64), char => char.charCodeAt(0)); resolve(new Blob([bytes])); } catch { resolve(null); }
+    });
+    nativeBridge.postMessage({ type: 'nearby-file-preview', id });
+  });
+}
+function filePreview(record) {
+  record.preview ||= window.NearbyFilePresentation.preview(record.name);
+  const nativeId = nativeFiles.has(record.key) ? record.key : nativeFiles.has(record.serverId) ? record.serverId : null;
+  if (record.size <= window.NearbyFilePresentation.maxPreviewBytes) {
+    if (record.file) void record.preview.load(record.file);
+    else if (record.localStored || (!state.admin && !record.target && (record.serverKind === 'share' || record.state === 'completed'))) void record.preview.load(async () => {
+      const response = await fetch(`/api/files/preview?kind=${encodeURIComponent(record.serverKind)}&id=${encodeURIComponent(record.serverId)}`, { headers: { Authorization: `Bearer ${authToken}` } });
+      return response.ok ? response.blob() : null;
+    });
+    else if (nativeBridge && nativeId) void record.preview.load(() => nativePreview(nativeId));
+  }
+  return record.preview.element;
+}
 const confirmationControl = $('confirm-invitation');
 try { confirmationControl.checked = localStorage.getItem('nearby.confirm-invitation') === 'true'; } catch {}
 confirmationControl.addEventListener('change', () => { try { localStorage.setItem('nearby.confirm-invitation', String(confirmationControl.checked)); } catch {} if (!confirmationControl.checked) attemptAutoJoin(); });
@@ -262,25 +287,39 @@ function renderTransfers() {
   for (const record of records.values()) { if (record.downloadError) record.status = record.downloadError; if (nativeFiles.has(record.serverId)) record.status = 'Получено и сохранено'; }
   const signature = JSON.stringify([...records.values()].map(({ key, status, busy, failed, received, serverId, localStored }) => [key, status, busy, failed, received, serverId, localStored, nativeFiles.has(key), nativeFiles.has(serverId)]));
   if (signature === rendered) return; rendered = signature;
-  $('queue').replaceChildren(); $('incoming').replaceChildren(); $('shared').replaceChildren();
-  for (const record of [...records.values()].reverse()) {
-    const element = document.createElement('tr'); element.className = 'file-row transfer'; element.dataset.record = record.key;
-    const name = document.createElement('td'), title = document.createElement('div'), device = document.createElement('div'); title.className = 'file-name transfer-title'; title.textContent = record.name; device.className = 'transfer-peer'; device.textContent = record.device || ''; name.append(title, device);
-    const size = document.createElement('td'); size.className = 'transfer-size'; size.textContent = sizes(record.size);
-    const date = document.createElement('td'), time = document.createElement('time'); time.dateTime = new Date(record.created).toISOString(); time.textContent = new Intl.DateTimeFormat('ru', { dateStyle: 'short', timeStyle: 'medium' }).format(record.created); date.append(time);
-    const status = document.createElement('td'), detail = document.createElement('div'); detail.className = 'file-meta transfer-detail'; detail.textContent = record.status; status.append(detail);
-    if (record.failed) element.classList.add('error');
-    if (record.busy) { const progress = document.createElement('progress'); progress.max = record.size || 1; progress.value = record.received || 0; status.append(progress); }
-    const actions = document.createElement('td'); actions.className = 'transfer-actions';
-    if (!record.busy && (!record.failed || record.serverKind === 'share') && (record.localStored || record.file || record.serverKind === 'share')) actions.append(button('Открыть', () => openRecord(record), true));
-    const remove = button('×', () => {
-      hiddenRecords.add(record.key);
-      if (record.serverId) { hiddenRecords.add(`${record.serverKind}:${record.serverId}`); if (record.target) { hiddenRecords.add(`peer-offer:${record.target.id}:${record.serverId}`); hiddenRecords.add(`peer-share:${record.target.id}:${record.serverId}`); } }
-      try { sessionStorage.setItem('nearby-hidden-records', JSON.stringify([...hiddenRecords].slice(-2000))); } catch {}
-      if (record.url) URL.revokeObjectURL(record.url); record.file = null; records.delete(record.key); rendered = ''; renderTransfers();
-    }, true); remove.classList.add('remove-transfer'); remove.setAttribute('aria-label', 'Удалить из списка'); remove.title = 'Удалить из списка'; remove.disabled = Boolean(record.busy); actions.append(remove);
-    element.append(name, size, date, status, actions);
-    $(record.direction === 'outgoing' ? 'queue' : record.target || !state.admin ? 'shared' : 'incoming').append(element);
+  for (const body of [$('queue'), $('incoming'), $('shared')]) for (const element of [...body.children]) if (!records.has(element.dataset.record)) element.remove();
+  for (const record of records.values()) {
+    // Keep the status button in place: polling/progress must preserve keyboard focus and an open tooltip.
+    if (!record.ui) {
+      const element = document.createElement('tr'); element.className = 'file-row transfer'; element.dataset.record = record.key;
+      const name = document.createElement('td'), title = document.createElement('div'), device = document.createElement('div'); title.className = 'file-name transfer-title'; title.textContent = record.name; device.className = 'transfer-peer'; device.textContent = record.device || '';
+      const file = document.createElement('div'), info = document.createElement('div'); file.className = 'transfer-file'; info.className = 'transfer-file-info'; info.append(title, device); file.append(filePreview(record), info); name.append(file);
+      const size = document.createElement('td'); size.className = 'transfer-size'; size.textContent = sizes(record.size);
+      const date = document.createElement('td'), time = document.createElement('time'); time.dateTime = new Date(record.created).toISOString(); time.textContent = new Intl.DateTimeFormat('ru', { dateStyle: 'short', timeStyle: 'medium' }).format(record.created); date.append(time);
+      const detail = document.createElement('div'); detail.className = 'file-meta transfer-detail'; const status = window.NearbyFilePresentation.status(detail);
+      const actions = document.createElement('td'); actions.className = 'transfer-actions';
+      const open = button('Открыть', () => openRecord(record), true); actions.append(open);
+      const remove = button('×', () => {
+        hiddenRecords.add(record.key);
+        if (record.serverId) { hiddenRecords.add(`${record.serverKind}:${record.serverId}`); if (record.target) { hiddenRecords.add(`peer-offer:${record.target.id}:${record.serverId}`); hiddenRecords.add(`peer-share:${record.target.id}:${record.serverId}`); } }
+        try { sessionStorage.setItem('nearby-hidden-records', JSON.stringify([...hiddenRecords].slice(-2000))); } catch {}
+        if (record.url) URL.revokeObjectURL(record.url); record.preview?.dispose(); window.NearbyFilePresentation.closeStatus(); record.file = null; records.delete(record.key); rendered = ''; renderTransfers();
+      }, true); remove.classList.add('remove-transfer'); remove.setAttribute('aria-label', 'Удалить из списка'); remove.title = 'Удалить из списка'; actions.append(remove);
+      element.append(name, size, date, status, actions);
+      $(record.direction === 'outgoing' ? 'queue' : record.target || !state.admin ? 'shared' : 'incoming').prepend(element);
+      record.ui = { element, info, detail, device, open, remove };
+    }
+    const ui = record.ui; filePreview(record);
+    if (ui.detail.textContent !== record.status) ui.detail.textContent = record.status;
+    if (ui.device.textContent !== (record.device || '')) ui.device.textContent = record.device || '';
+    ui.element.classList.toggle('error', Boolean(record.failed));
+    let progress = ui.info.querySelector('progress');
+    if (record.busy) {
+      if (!progress) { progress = document.createElement('progress'); progress.setAttribute('aria-label', 'Прогресс передачи'); ui.info.append(progress); }
+      progress.max = record.size || 1; progress.value = record.received || 0;
+    } else progress?.remove();
+    ui.open.hidden = Boolean(record.busy || (record.failed && record.serverKind !== 'share') || !(record.localStored || record.file || record.serverKind === 'share'));
+    ui.remove.disabled = Boolean(record.busy);
   }
 }
 function receiveShare(record) {

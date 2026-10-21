@@ -40,7 +40,7 @@ try {
   await client.locator('#pc-connect-submit').click(); await client.waitForFunction(() => !document.querySelector('#pc-connected').hidden);
   const bytes = randomBytes(1024 * 1024 + 11);
   await client.locator('#files').setInputFiles({ name: 'discovered-peer.bin', mimeType: 'application/octet-stream', buffer: bytes });
-  await client.locator('#queue .file-row').filter({ hasText: 'discovered-peer.bin' }).getByText('Получено и сохранено на компьютере', { exact: true }).waitFor();
+  await client.locator('#queue .file-row').filter({ hasText: 'discovered-peer.bin' }).getByText('Получено и сохранено на компьютере', { exact: true }).waitFor({ state: 'attached' });
   const saved = (await readdir(first.inbox)).find(name => name.endsWith('-discovered-peer.bin'));
   const hash = data => createHash('sha256').update(data).digest('hex'); assert.equal(hash(await readFile(path.join(first.inbox, saved))), hash(bytes));
   await client.locator('#tab-connection').click(); await client.locator('#pc-disconnect').click(); await client.locator('#discovery').waitFor();

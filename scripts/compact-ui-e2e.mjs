@@ -58,7 +58,7 @@ try {
   for (const [name, data] of [['auto.bin', randomBytes(1024 * 1024 + 17)], ['auto-empty.txt', Buffer.alloc(0)]]) {
     await owner.locator('#tab-connection').click();
     await client.locator('#files').setInputFiles({ name, mimeType: 'application/octet-stream', buffer: data });
-    await client.locator('#queue .file-row').filter({ hasText: name }).getByText('Получено и сохранено на компьютере', { exact: true }).waitFor();
+    await client.locator('#queue .file-row').filter({ hasText: name }).getByText('Получено и сохранено на компьютере', { exact: true }).waitFor({ state: 'attached' });
     await owner.locator('#tab-transfer[aria-selected=true]').waitFor();
     assert.equal(await owner.getByRole('button', { name: 'Принять', exact: true }).count(), 0);
     const saved = (await readdir(first.inbox)).find(file => file.endsWith('-' + name));
@@ -150,7 +150,7 @@ try {
     await from.locator('#files').setInputFiles({ name, mimeType:'application/octet-stream',buffer:data });
     const card = to.locator('.transfer').filter({ has: to.getByText(name,{exact:true}) });
     if (disk) {
-      await card.getByText('Сохранён в выбранную папку.', {exact:true}).waitFor();
+      await card.getByText('Сохранён в выбранную папку.', {exact:true}).waitFor({ state: 'attached' });
       const saved = await to.evaluate(async name => { const dir = await navigator.storage.getDirectory(); for await (const [filename, handle] of dir.entries()) if(filename.endsWith('-'+name)){const file=await handle.getFile();return [...new Uint8Array(await file.arrayBuffer())];} }, name);
       assert.equal(hash(Buffer.from(saved)), hash(data));
     } else {

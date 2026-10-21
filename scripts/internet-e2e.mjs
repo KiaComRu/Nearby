@@ -6,6 +6,7 @@ import { mkdtemp, rm, readFile, readdir, mkdir, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
+import { checkFilePresentation } from './check-file-presentation.mjs';
 const state = await mkdtemp(path.join(tmpdir(), 'nearby-internet-e2e-'));
 const port = await new Promise(resolve => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); });
 const target = `http://127.0.0.1:${port}/`;
@@ -17,7 +18,7 @@ async function stats() { return (await fetch(target + 'api.php', { method: 'POST
 try {
   for (let i = 0; i < 50; i++) { try { await fetch(target); break; } catch { await new Promise(r => setTimeout(r, 100)); } }
   browser = await chromium.launch({ headless: true });
-  const contexts = await Promise.all([browser.newContext({ acceptDownloads: true }), browser.newContext({ acceptDownloads: true, viewport: { width: 390, height: 844 }, isMobile: true, userAgent: 'Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 Chrome/140.0.0.0 Mobile Safari/537.36' })]);
+  const contexts = await Promise.all([browser.newContext({ acceptDownloads: true }), browser.newContext({ acceptDownloads: true, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, userAgent: 'Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 Chrome/140.0.0.0 Mobile Safari/537.36' })]);
   // Only the website HTTP origin is reachable; no RTC transport or peer LAN endpoints.
   for (const context of contexts) {
     await context.addInitScript(() => { localStorage.setItem('nearby-site-language', 'ru'); window.RTCPeerConnection = undefined; window.showSaveFilePicker = undefined; });
@@ -42,7 +43,7 @@ try {
     const downloading = to.waitForEvent('download');
     await from.locator('#files').setInputFiles({ name, mimeType: 'application/octet-stream', buffer: bytes });
     const card = to.locator('.transfer').filter({ has: to.getByText(name, { exact: true }) });
-    await card.getByText('Файл принят. Загрузка началась автоматически.', { exact: true }).waitFor({ timeout: 60000 });
+    await card.getByText('Файл принят. Загрузка началась автоматически.', { exact: true }).waitFor({ state: 'attached', timeout: 60000 });
     const download = await downloading; assert.equal(download.suggestedFilename(), name);
     assert.equal(hash(await readFile(await download.path())), hash(bytes));
     count++; size += bytes.length;
@@ -54,7 +55,15 @@ try {
     assert.equal(await open.getAttribute('rel'), 'noopener noreferrer');
     const preview = await to.evaluate(async url => { const response = await fetch(url); return { type: response.headers.get('content-type'), bytes: [...new Uint8Array(await response.arrayBuffer())] }; }, url);
     assert.equal(hash(Buffer.from(preview.bytes)), hash(bytes));
-    assert.equal(preview.type, name.endsWith('.txt') ? 'text/plain' : 'application/octet-stream');
+    assert.equal(preview.type, name.endsWith('.png') ? 'image/png' : name.endsWith('.txt') ? 'text/plain' : 'application/octet-stream');
+    if (name.endsWith('.png')) {
+      await checkFilePresentation(to, card, { image: true, touch: to === guest });
+      const outgoing = from.locator('#outgoing-transfers .transfer').filter({ has: from.getByText(name, { exact: true }) });
+      await checkFilePresentation(from, outgoing, { image: true, touch: from === guest });
+      await to.screenshot({ path: 'artifacts/preview-status-mobile.png' });
+      await outgoing.locator('.transfer-status-button').click(); await from.screenshot({ path: 'artifacts/preview-status-desktop.png' }); await from.keyboard.press('Escape');
+    }
+    if (name.endsWith('.html')) { assert.equal(await card.locator('.file-preview img').count(), 0); assert.equal(await card.locator('.file-preview').textContent(), 'HTML'); }
     if (name === 'preview.txt') { const opened = to.waitForEvent('popup'); await open.click(); const previewPage = await opened; await previewPage.waitForLoadState(); assert.equal(await previewPage.locator('body').innerText(), bytes.toString()); await previewPage.close(); }
     if (name.endsWith('.html')) assert.equal(await open.getAttribute('download'), name);
     if (name === 'private-to-phone.bin') {
@@ -75,6 +84,8 @@ try {
   await transfer(host, guest, 'private-empty.txt', Buffer.alloc(0));
   await transfer(host, guest, 'preview.txt', Buffer.from('Nearby preview works.'));
   await transfer(host, guest, 'untrusted.html', Buffer.from('<script>opener.alert(1)</script>'));
+  const image = Buffer.from(await host.evaluate(() => { const canvas=document.createElement('canvas'); canvas.width=160; canvas.height=100; const context=canvas.getContext('2d'); context.fillStyle='#3686c8'; context.fillRect(0,0,160,100); context.fillStyle='#77e8ff'; context.fillRect(15,15,50,70); context.fillStyle='#fff'; context.fillRect(80,40,65,45); return canvas.toDataURL('image/png').split(',')[1]; }), 'base64');
+  await transfer(host, guest, 'image-preview.png', image);
   await host.evaluate(() => { const files = new DataTransfer(); files.items.add(new File([new ArrayBuffer(100 * 1024 ** 2 + 1)], 'private-too-large.bin')); const input = document.querySelector('#files'); input.files = files.files; input.dispatchEvent(new Event('change', { bubbles: true })); });
   await host.locator('#notice').filter({ hasText: 'Недопустимое имя или размер файла' }).waitFor();
   assert.equal(await guest.getByText('private-too-large.bin', { exact: true }).count(), 0);

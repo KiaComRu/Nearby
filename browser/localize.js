@@ -6,6 +6,7 @@
     ["Название файла", "File name", "फ़ाइल का नाम", "文件名", "Nombre del archivo"],
     ["Размер", "Size", "आकार", "大小", "Tamaño"],
     ["Дата и время", "Date and time", "तारीख और समय", "日期和时间", "Fecha y hora"],
+    ["Статус передачи", "Transfer status", "ट्रांसफ़र की स्थिति", "传输状态", "Estado de la transferencia"],
     ["Статус", "Status", "स्थिति", "状态", "Estado"],
     ["Действия", "Actions", "कार्रवाइयाँ", "操作", "Acciones"],
     ["Открыть", "Open", "खोलें", "打开", "Abrir"],
@@ -232,7 +233,7 @@
   if (browserLanguage === 'zh') browserLanguage = 'zh-CN';
   let language = supported.includes(query) ? query : supported.includes(remembered) ? remembered : browserLanguage || 'en';
   const records = new WeakMap();
-  const protectedSelector = '.transfer-title,.transfer-peer,.device-name,#peer-name,#connection-id span,input,textarea,script,style,code,.web-language';
+  const protectedSelector = '.file-preview,.transfer-title,.transfer-peer,.device-name,#peer-name,#connection-id span,input,textarea,script,style,code,.web-language';
   function translate(source) {
     if (language === 'ru') return source;
     const index = languages.indexOf(language), value = source.replace(/\s+/g, ' ').trim();

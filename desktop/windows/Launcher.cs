@@ -14,8 +14,8 @@ using Microsoft.Web.WebView2.WinForms;
 
 [assembly: System.Reflection.AssemblyTitle("Nearby")]
 [assembly: System.Reflection.AssemblyDescription("Передача файлов по локальной сети")]
-[assembly: System.Reflection.AssemblyVersion("0.5.7.0")]
-[assembly: System.Reflection.AssemblyFileVersion("0.5.7.0")]
+[assembly: System.Reflection.AssemblyVersion("0.5.8.0")]
+[assembly: System.Reflection.AssemblyFileVersion("0.5.8.0")]
 #if SERVER2016
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.6.2")]
 #endif
@@ -361,6 +361,7 @@ internal sealed class NearbyWindow : Form
                 if (!Uri.TryCreate(e.Source, UriKind.Absolute, out source) || source.GetLeftPart(UriPartial.Authority) != origin || source.AbsolutePath != "/") return;
                 try {
                     var serializer = new JavaScriptSerializer();
+                    serializer.MaxJsonLength = 12 * 1024 * 1024;
                     var value = serializer.Deserialize<Dictionary<string, object>>(e.WebMessageAsJson);
                     string type = value.ContainsKey("type") ? value["type"] as string : null;
                     string id = value.ContainsKey("id") ? value["id"] as string : null;
@@ -381,6 +382,24 @@ internal sealed class NearbyWindow : Form
                         } catch { /* Browser-only and drag-and-drop files retain their download fallback. */ }
                         if (objectId != null) try { await web.CoreWebView2.CallDevToolsProtocolMethodAsync("Runtime.releaseObject", serializer.Serialize(new { objectId = objectId })); } catch {}
                         web.CoreWebView2.PostWebMessageAsJson(serializer.Serialize(new { type = "nearby-file-registered", id = id, ok = ok }));
+                    } else if (type == "nearby-file-preview") {
+                        string base64 = null;
+                        if (localFiles.ContainsKey(id)) {
+                            string previewPath = localFiles[id];
+                            base64 = await Task.Run(delegate {
+                                try {
+                                    string ext = Path.GetExtension(previewPath).ToLowerInvariant();
+                                    if (Array.IndexOf(new string[] { ".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".bmp" }, ext) < 0) return null;
+                                    using (var stream = new FileStream(previewPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite)) {
+                                        if (stream.Length < 1 || stream.Length > 8 * 1024 * 1024) return null;
+                                        byte[] bytes = new byte[(int)stream.Length]; int offset = 0;
+                                        while (offset < bytes.Length) { int count = stream.Read(bytes, offset, bytes.Length - offset); if (count == 0) return null; offset += count; }
+                                        return Convert.ToBase64String(bytes);
+                                    }
+                                } catch { return null; }
+                            });
+                        }
+                        web.CoreWebView2.PostWebMessageAsJson(serializer.Serialize(new { type = "nearby-file-preview", id = id, base64 = base64 }));
                     } else if (type == "nearby-open-file" && localFiles.ContainsKey(id)) {
                         string file = localFiles[id];
                         if (!File.Exists(file)) throw new FileNotFoundException("Файл был перемещён или удалён.");

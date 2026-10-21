@@ -9,8 +9,10 @@ await build({ entryPoints: [root + '../node_modules/qrcode/lib/browser.js'], bun
 await copyFile(root + '../node_modules/qrcode/license', root + 'vendor/QRCode-LICENSE.txt');
 await copyFile(root + '../node_modules/dijkstrajs/LICENSE.md', root + 'vendor/dijkstrajs-LICENSE.txt');
 await copyFile(root + '../public/statistics.js', root + 'statistics.js');
+for (const name of ['file-presentation.js','file-presentation.css']) await copyFile(root + '../public/' + name, root + name);
 const version = JSON.parse(await readFile(root + 'version.json', 'utf8')).version;
 await copyFile(root + 'app.js', root + `app-${version}.js`);
+const presentationRevision = createHash('sha256').update(await readFile(root + 'file-presentation.js')).update(await readFile(root + 'file-presentation.css')).digest('hex').slice(0,12);
 const html = await readFile(root + 'index.html','utf8');
 const appRevision = createHash('sha256').update(await readFile(root + 'app.js')).digest('hex').slice(0,12);
 const styleRevision = createHash('sha256').update(await readFile(root + 'workspace.css')).digest('hex').slice(0,12);
@@ -18,5 +20,6 @@ const localeRevision = createHash('sha256').update(await readFile(root + 'locali
 await writeFile(root + 'index.html',html
   .replace(/src="app(?:-\d+\.\d+\.\d+)?\.js(?:\?[^"\s]*)?"/, `src="app-${version}.js?v=${appRevision}"`)
   .replace(/href="workspace\.css(?:\?[^"\s]*)?"/, `href="workspace.css?v=${styleRevision}"`)
+  .replace(/(?:src|href)="(file-presentation\.(?:js|css))(?:\?[^"\s]*)?"/g, (match, name) => `${name.endsWith('.js') ? 'src' : 'href'}="${name}?v=${presentationRevision}"`)
   .replace(/src="localize\.js(?:\?[^"\s]*)?"/, `src="localize.js?v=${localeRevision}"`));
 console.log('Browser QR bundle built locally; no external QR service.');

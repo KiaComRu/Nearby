@@ -42,7 +42,7 @@ try {
   for (const [name, data] of [['ПК-на-ПК.bin', bytes], ['empty.txt', Buffer.alloc(0)]]) {
     await client.locator('#files').setInputFiles({ name, mimeType: 'application/octet-stream', buffer: data });
     const incoming = owner.locator('#incoming .file-row').filter({ hasText: name });
-    await client.locator('#queue .file-row').filter({ hasText: name }).getByText('Получено и сохранено на компьютере', { exact: true }).waitFor();
+    await client.locator('#queue .file-row').filter({ hasText: name }).getByText('Получено и сохранено на компьютере', { exact: true }).waitFor({ state: 'attached' });
     const saved = (await readdir(first.inbox)).find(file => file.endsWith('-' + name));
     assert.equal(digest(await readFile(path.join(first.inbox, saved))), digest(data));
     const downloading = client.waitForEvent('download');

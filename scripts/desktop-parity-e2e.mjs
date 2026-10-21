@@ -5,6 +5,7 @@ import { mkdtemp, rm, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomBytes, createHash } from 'node:crypto';
+import { checkFilePresentation } from './check-file-presentation.mjs';
 const directory = await mkdtemp(path.join(tmpdir(), 'nearby-desktop-parity-'));
 const applications = [], opened = [], errors = [], downloads = new Map();
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -36,7 +37,7 @@ try {
   await choose(second, phoneTarget.name); await sendDownload(second, phone, 'only-phone.bin'); assert.equal(await owner.locator('#incoming .file-name').filter({ hasText: 'only-phone.bin' }).count(), 0);
   await choose(second, ownerTarget.name);
   const bytes = randomBytes(66001); await second.locator('#files').setInputFiles({ name: 'to-owner.bin', mimeType: 'application/octet-stream', buffer: bytes });
-  const received = owner.locator('#incoming .file-row').filter({ hasText: 'to-owner.bin' }); await received.getByText('Получено и сохранено', { exact: true }).waitFor();
+  const received = owner.locator('#incoming .file-row').filter({ hasText: 'to-owner.bin' }); await received.getByText('Получено и сохранено', { exact: true }).waitFor({ state: 'attached' });
   const saved = (await readdir(firstApp.inbox)).find(name => name.endsWith('-to-owner.bin')); assert.equal(digest(await readFile(path.join(firstApp.inbox, saved))), digest(bytes));
   assert.equal(await received.locator('td').count(), 5); assert.ok(Date.parse(await received.locator('time').getAttribute('datetime')) > 0);
   const cells = await received.locator('td').evaluateAll(nodes => nodes.map(n => ({ x: n.getBoundingClientRect().x, y: n.getBoundingClientRect().y }))); assert.ok(cells.every(c => c.y === cells[0].y));
@@ -44,8 +45,17 @@ try {
   await received.getByRole('button', { name: 'Удалить из списка' }).click(); await owner.waitForTimeout(1800); assert.equal(await received.count(), 0); assert.equal(digest(await readFile(path.join(firstApp.inbox, saved))), digest(bytes));
   // The second PC keeps receiving from its phone while the upstream PC remains selected.
   const incomingPhone = Buffer.from('From phone while another recipient is selected.'); await phone.locator('#files').setInputFiles({ name: 'phone-to-second.txt', mimeType: 'text/plain', buffer: incomingPhone });
-  await second.locator('#incoming .file-row').filter({ hasText: 'phone-to-second.txt' }).getByText('Получено и сохранено', { exact: true }).waitFor(); assert.equal(await second.locator('#recipient-name').textContent(), ownerTarget.name);
+  await second.locator('#incoming .file-row').filter({ hasText: 'phone-to-second.txt' }).getByText('Получено и сохранено', { exact: true }).waitFor({ state: 'attached' }); assert.equal(await second.locator('#recipient-name').textContent(), ownerTarget.name);
   const phoneSaved = (await readdir(secondApp.inbox)).find(name => name.endsWith('-phone-to-second.txt')); assert.equal(await readFile(path.join(secondApp.inbox, phoneSaved), 'utf8'), incomingPhone.toString());
+  const image = Buffer.from(await phone.evaluate(() => { const canvas=document.createElement('canvas'); canvas.width=120;canvas.height=80;const context=canvas.getContext('2d');context.fillStyle='#168956';context.fillRect(0,0,120,80);context.fillStyle='#fff';context.fillRect(20,20,80,40);return canvas.toDataURL('image/png').split(',')[1]; }), 'base64');
+  await phone.locator('#files').setInputFiles({ name: 'local-preview.png', mimeType: 'image/png', buffer: image });
+  const imageRow = second.locator('#incoming .file-row').filter({ hasText: 'local-preview.png' });
+  await imageRow.getByText('Получено и сохранено', { exact: true }).waitFor({state:'attached'});
+  await checkFilePresentation(second, imageRow, { image:true });
+  await checkFilePresentation(phone, phone.locator('#queue .file-row').filter({hasText:'local-preview.png'}), {image:true,touch:true});
+  await choose(second, phoneTarget.name); await sendDownload(second, phone, 'local-download-preview.png', image);
+  await checkFilePresentation(phone, phone.locator('#shared .file-row').filter({hasText:'local-download-preview.png'}), {image:true,touch:true});
+  await choose(second, ownerTarget.name);
   await owner.locator('#tab-connection').click(); assert.ok(await owner.locator('#transfer-statistics').isVisible()); await owner.locator('#tab-transfer').click(); assert.ok(await owner.locator('#transfer-statistics').isHidden());
   await choose(owner, 'Second PC');
   let release, started; const hold = new Promise(resolve => { release = resolve; }), intercepted = new Promise(resolve => { started = resolve; }); let once = true;
@@ -57,7 +67,7 @@ try {
   assert.equal(await third.locator('.file-name').filter({ hasText: 'never-third.bin' }).count(), 0);
   await owner.locator('#select-remaining').click(); assert.equal(await owner.locator('#recipient-name').textContent(), 'Third PC');
   await sendDownload(owner, third, 'after-explicit-selection.bin');
-  const sent = owner.locator('#queue .file-row').filter({ hasText: 'after-explicit-selection.bin' }); await sent.getByText('Передан получателю', { exact: true }).waitFor(); await sent.getByRole('button', { name: 'Удалить из списка' }).click(); await owner.waitForTimeout(1800); assert.equal(await sent.count(), 0, 'a hidden local send must not reappear as a share');
+  const sent = owner.locator('#queue .file-row').filter({ hasText: 'after-explicit-selection.bin' }); await sent.getByText('Передан получателю', { exact: true }).waitFor({ state: 'attached' }); await sent.getByRole('button', { name: 'Удалить из списка' }).click(); await owner.waitForTimeout(1800); assert.equal(await sent.count(), 0, 'a hidden local send must not reappear as a share');
   for (const viewport of [{ width: 1366, height: 768 }, { width: 390, height: 844 }]) { await owner.setViewportSize(viewport); assert.ok(await owner.evaluate(() => document.documentElement.scrollWidth <= innerWidth && document.documentElement.scrollHeight <= innerHeight)); }
   await owner.screenshot({ path: 'artifacts/desktop-parity-mobile.png' }); await second.screenshot({ path: 'artifacts/desktop-parity-second.png' });
   const manual = await (await browser.newContext()).newPage(); await manual.addInitScript(() => localStorage.setItem('nearby.confirm-invitation', 'true')); await manual.goto(origin(firstApp) + '/#pin=' + firstApp.pin); await manual.locator('#join-form').waitFor(); assert.ok(await manual.locator('#transfer-workspace').isHidden()); await manual.locator('#join-form button').click(); await manual.waitForFunction(() => !document.querySelector('#files').disabled);
