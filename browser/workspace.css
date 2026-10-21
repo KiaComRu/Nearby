@@ -111,7 +111,28 @@ body.compact-app{height:100vh;height:100dvh;min-height:0;display:flex;flex-direc
 @media(max-width:550px){.web-app .connection-panel:has(.invitation-id:not([hidden])) #invitation .qr-wrap{order:4}}
 @media(max-width:550px){.web-app .connection-card #invitation{grid-template-columns:minmax(0,1fr)}.web-app .connection-card .qr-wrap{grid-row:auto;justify-self:center;width:105px;height:105px}.web-app .connection-card .qr-wrap canvas{max-width:95px!important;max-height:95px!important}.web-app .connection-card .connection-state h2{font-size:14px}.web-app .connection-card .connection-panel{gap:5px}.web-app .connection-card .connection-panel p{margin-bottom:0}.web-app .connection-card .qr-help,.web-app .connection-card .step{display:none}}
 .web-app #stats-heading{line-height:1.25}.web-app #transfer-statistics .statistics-values span{line-height:1.25}
-@media(max-width:550px){.web-app #transfer-statistics{height:94px;min-height:94px;display:block;padding:8px 11px 20px}.web-app #stats-heading{font-size:11px;margin:0 0 5px}.web-app #transfer-statistics .statistics-values{width:100%;gap:9px}.web-app .statistics-values strong,.web-app .statistics-values button{white-space:nowrap;font-size:19px;letter-spacing:-.6px}.web-app #stats-state{font-size:8px}}
+@media (max-width:550px), (max-width:950px) and (pointer:coarse) {
+  .web-app .transfer-columns {
+    grid-template-columns:minmax(0,1fr);
+    grid-template-rows:minmax(190px,1fr) minmax(170px,1fr);
+    overflow-y:auto;
+    overscroll-behavior:contain;
+  }
+  .web-app #transfer-statistics {
+    height:auto;min-height:126px;display:grid;
+    grid-template-areas:"heading heading" "values values" "help state";
+    grid-template-columns:max-content minmax(0,1fr);
+    align-items:start;gap:8px 10px;padding:10px 11px;
+  }
+  .web-app #stats-heading {grid-area:heading;font-size:11px;margin:0}
+  .web-app #transfer-statistics .statistics-values {grid-area:values;width:100%;gap:9px}
+  .web-app #transfer-statistics .statistics-values>div {gap:5px}
+  .web-app .statistics-values strong,.web-app .statistics-values button {white-space:nowrap;font-size:19px;letter-spacing:-.6px}
+  .web-app #stats-volume {text-underline-offset:3px}
+  .web-app #transfer-statistics .statistics-values span {font-size:10px;line-height:1.35}
+  .web-app #transfer-statistics .statistics-help {grid-area:help;position:static;align-self:end;font-size:9px}
+  .web-app #stats-state {grid-area:state;position:static;max-width:none;margin:0;font-size:9px;line-height:1.35;white-space:normal;overflow:visible;text-align:right}
+}
 
 .web-app #connection-settings{align-self:center;min-width:0;font-size:12px}.web-app #connection-settings summary{cursor:pointer;color:var(--muted)}.web-app #connection-settings[open]{align-self:start}.web-app #connection-settings select{width:100%;max-width:100%}
 .web-app .invitation-confirmation{display:flex;align-items:flex-start;gap:8px;line-height:1.4;margin-top:10px}.web-app #confirm-invitation{width:16px;height:16px;min-height:0;flex:0 0 16px;padding:0;margin:1px 0 0;accent-color:var(--cyan)}
