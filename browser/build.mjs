@@ -9,7 +9,7 @@ await build({ entryPoints: [root + '../node_modules/qrcode/lib/browser.js'], bun
 await copyFile(root + '../node_modules/qrcode/license', root + 'vendor/QRCode-LICENSE.txt');
 await copyFile(root + '../node_modules/dijkstrajs/LICENSE.md', root + 'vendor/dijkstrajs-LICENSE.txt');
 await copyFile(root + '../public/statistics.js', root + 'statistics.js');
-const version = JSON.parse(await readFile(root + '../package.json', 'utf8')).version;
+const version = JSON.parse(await readFile(root + 'version.json', 'utf8')).version;
 await copyFile(root + 'app.js', root + `app-${version}.js`);
 const html = await readFile(root + 'index.html','utf8');
 const appRevision = createHash('sha256').update(await readFile(root + 'app.js')).digest('hex').slice(0,12);

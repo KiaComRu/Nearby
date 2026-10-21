@@ -3,6 +3,22 @@
   const languages = ['en', 'hi', 'zh-CN', 'es'];
   const supported = ['ru', ...languages];
   const rows = [
+    ["Устройства", "Devices", "डिवाइस", "设备", "Dispositivos"],
+    ["Подключённые устройства", "Connected devices", "कनेक्ट किए गए डिवाइस", "已连接的设备", "Dispositivos conectados"],
+    ["Выберите получателя, затем откройте вкладку «Передача».", "Choose a recipient, then open the Transfer tab.", "प्राप्तकर्ता चुनें, फिर ट्रांसफ़र टैब खोलें।", "选择接收设备，然后打开“传输”标签页。", "Elige un destinatario y abre la pestaña Transferencia."],
+    ["Получатель файлов", "File recipient", "फ़ाइल प्राप्तकर्ता", "文件接收设备", "Destinatario de archivos"],
+    ["Нет подключённых устройств", "No connected devices", "कोई डिवाइस कनेक्ट नहीं है", "没有已连接的设备", "No hay dispositivos conectados"],
+    ["Перейти к передаче", "Go to transfer", "ट्रांसफ़र पर जाएँ", "前往传输", "Ir a transferencia"],
+    ["Подключено устройств:", "Connected devices:", "कनेक्ट किए गए डिवाइस:", "已连接设备：", "Dispositivos conectados:"],
+    ["Получатель:", "Recipient:", "प्राप्तकर्ता:", "接收设备：", "Destinatario:"],
+    ["Устройство не выбрано", "No device selected", "कोई डिवाइस नहीं चुना गया", "未选择设备", "Ningún dispositivo seleccionado"],
+    ["Выбрать устройство:", "Select device:", "डिवाइस चुनें:", "选择设备：", "Seleccionar dispositivo:"],
+    ["Отключить", "Disconnect", "डिस्कनेक्ट करें", "断开连接", "Desconectar"],
+    ["Отключить выбранное устройство", "Disconnect selected device", "चुना हुआ डिवाइस डिस्कनेक्ट करें", "断开所选设备", "Desconectar el dispositivo seleccionado"],
+    ["Отменить подключение", "Cancel connection", "कनेक्शन रद्द करें", "取消连接", "Cancelar conexión"],
+    ["Выберите получателя на вкладке «Устройства».", "Choose a recipient on the Devices tab.", "डिवाइस टैब पर प्राप्तकर्ता चुनें।", "请在“设备”标签页选择接收设备。", "Elige un destinatario en la pestaña Dispositivos."],
+    ["Это приглашение уже открыто на этом устройстве.", "This invitation is already open on this device.", "यह आमंत्रण इस डिवाइस पर पहले से खुला है।", "此邀请已在本设备打开。", "Esta invitación ya está abierta en este dispositivo."],
+
     ['Проверьте ID: нужны все 9 цифр.', 'Check the ID: enter all 9 digits.', 'ID जाँचें: सभी 9 अंक डालें।', '请检查 ID：输入完整的 9 位数字。', 'Comprueba el ID: introduce los 9 dígitos.'],
     ['123-456-789 или ссылка', '123-456-789 or a link', '123-456-789 या लिंक', '123-456-789 或链接', '123-456-789 o enlace'],
     ['Некорректный ключ устройства. Создайте новое приглашение.', 'Invalid device key. Create a new invitation.', 'डिवाइस की कुंजी सही नहीं है। नया आमंत्रण बनाएँ।', '设备密钥无效，请创建新邀请。', 'Clave de dispositivo no válida. Crea una invitación nueva.'],
@@ -204,7 +220,7 @@
   if (browserLanguage === 'zh') browserLanguage = 'zh-CN';
   let language = supported.includes(query) ? query : supported.includes(remembered) ? remembered : browserLanguage || 'en';
   const records = new WeakMap();
-  const protectedSelector = '.transfer-title,#peer-name,#connection-id span,input,textarea,script,style,code,.web-language';
+  const protectedSelector = '.transfer-title,.transfer-peer,.device-name,#peer-name,#connection-id span,input,textarea,script,style,code,.web-language';
   function translate(source) {
     if (language === 'ru') return source;
     const index = languages.indexOf(language), value = source.replace(/\s+/g, ' ').trim();

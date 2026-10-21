@@ -1,35 +1,30 @@
-import { FileLink, MEMORY_LIMIT, DISK_LIMIT, validateFileSpec } from './transfer.mjs';
-import { HttpsRelayChannel, newRelaySecret } from './relay.mjs';
-import { ProbeChannel } from './probe-channel.mjs';
+import { MEMORY_LIMIT, DISK_LIMIT, validateFileSpec } from './transfer.mjs';
+import { newRelaySecret } from './relay.mjs';
 import { normalizeInvitationId, formatInvitationId, invitationCredentials, shortInvitationLookup, invitationKeyExchange, sharedInvitationSecret } from './invitation-id.mjs?v=numeric-1';
+import { Connection, requestApi } from './connection.mjs?v=devices-1';
 const $ = id => document.getElementById(id);
-// Some mobile browsers expose the picker but cannot write to its selected handle.
 const mobileDevice = navigator.userAgentData?.mobile === true || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (/Mac/i.test(navigator.platform || '') && navigator.maxTouchPoints > 1);
 const diskSupported = !mobileDevice && typeof window.showDirectoryPicker === 'function';
-let receiveDirectory = null;
-const rows = new Map(), objectUrls = new Set();
-let session = null, peer = null, link = null, pollTimer, connectionTimer, cursor = 0, started = false, sending = false, incomingCandidates = [], stopped = false;
-let invitation = null, joinInvite = null, signalChain = Promise.resolve();
-let invitationId = null, idExpiryTimer;
-let bufferedBytes = 0;
-let relayChannel = null;
-let transport = null, probeChannel = null, activeChannel = null, connectionReady = false;
-let disconnectTimer, polling = false, directBroken = false, recoveryRequest = false;
-let joining = false;
+const connections = new Map(), rows = new Map(), objectUrls = new Set();
+let receiveDirectory = null, bufferedBytes = 0, selectedId = null, selectionLost = false, everConnected = false;
+let setup = null, creating = false, joining = false, sending = false, appClosed = false;
+let invitation = null, invitationId = null, joinInvite = null, idExpiryTimer, connectionNumber = 0, deviceListSignature = '';
+const sizes = n => n < 1024 ? `${n} Б` : n < 1024 ** 2 ? `${(n / 1024).toFixed(1)} КиБ` : n < 1024 ** 3 ? `${(n / 1024 ** 2).toFixed(1)} МиБ` : `${(n / 1024 ** 3).toFixed(1)} ГиБ`;
+const rowKey = (connection, id) => `${connection.id}:${id}`;
+const liveConnections = () => [...connections.values()].filter(connection => connection.hasConnected && !connection.stopped);
+const selectedConnection = () => connections.get(selectedId);
+function notice(text, error = false) { $('notice').textContent = text; $('notice').classList.toggle('error', error); $('notice').hidden = !text; }
+function status(title, detail, connected = false) { $('connection-title').textContent = title; $('connection-detail').textContent = detail; $('status-dot').classList.toggle('connected', connected); }
 const confirmationStorageKey = 'nearby.confirm-invitation';
 let confirmInvitation = false;
-try { confirmInvitation = localStorage.getItem(confirmationStorageKey) === 'true'; } catch { /* Automatic joining works without storage. */ }
+try { confirmInvitation = localStorage.getItem(confirmationStorageKey) === 'true'; } catch {}
 const confirmationControl = $('confirm-invitation');
 if (confirmationControl) confirmationControl.checked = confirmInvitation;
 confirmationControl?.addEventListener('change', () => {
   confirmInvitation = confirmationControl.checked;
-  try { localStorage.setItem(confirmationStorageKey, String(confirmInvitation)); } catch { /* Apply to this page only. */ }
+  try { localStorage.setItem(confirmationStorageKey, String(confirmInvitation)); } catch {}
   if (!confirmInvitation && joinInvite) void join(joinInvite);
 });
-let peerDisplayName = '';
-const sizes = n => n < 1024 ? `${n} Б` : n < 1024 ** 2 ? `${(n / 1024).toFixed(1)} КиБ` : n < 1024 ** 3 ? `${(n / 1024 ** 2).toFixed(1)} МиБ` : `${(n / 1024 ** 3).toFixed(1)} ГиБ`;
-function notice(text, error = false) { $('notice').textContent = text; $('notice').classList.toggle('error', error); $('notice').hidden = !text; }
-function status(title, detail, connected = false) { $('connection-title').textContent = title; $('connection-detail').textContent = detail; $('status-dot').classList.toggle('connected', connected); }
 const nameStorageKey = 'nearby.device-name';
 const nameVersionKey = 'nearby.device-name.version';
 function cleanDeviceName(value) { return typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 40) : ''; }
@@ -70,12 +65,6 @@ function deviceName() {
 $('device-name').addEventListener('input', rememberDeviceName);
 $('device-name').addEventListener('blur', deviceName);
 rememberDeviceName();
-async function api(action, extra = {}, anonymous = false) {
-  const response = await fetch(action.startsWith('relay-') ? 'api.php?transport=relay' : 'api.php', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(15000), body: JSON.stringify({ action, ...(anonymous ? {} : { room: session.room, token: session.token }), ...extra }) });
-  const result = await response.json().catch(() => { throw new Error('Сервер вернул неожиданный ответ. Попробуйте позже.'); });
-  if (!response.ok || result.error) { const error = new Error(result.error || 'Ошибка соединения.'); error.status = response.status; throw error; }
-  return result;
-}
 function parseInvite(value) {
   const url = new URL(value, location.href);
   if (url.origin !== location.origin || url.pathname !== location.pathname) throw new Error('Нужна ссылка-приглашение Nearby с этого сайта.');
@@ -86,258 +75,159 @@ function parseInvite(value) {
   if (!['lan', 'internet', 'auto'].includes(mode) || (mode !== 'lan' && !/^[a-f0-9]{64}$/.test(relaySecret || ''))) throw new Error('Нужна полная ссылка с ключом интернет-передачи. Скопируйте приглашение заново.');
   return { room, token, mode, relaySecret };
 }
-function showSession() {
-  const card = $(session.role === 'host' ? 'invite-card' : 'connect-card');
-  if (card) {
-    // Keep the connection workspace in place; replace only the action that was used.
-    card.querySelector('.connection-entry').hidden = true;
-    card.append($('session'));
-    for (const control of $('start').querySelectorAll('.start-settings input,.start-settings select,.connection-entry input,.connection-entry button')) control.disabled = true;
-  } else $('start').hidden = true; // Compatible with an already open page from the previous release.
-  $('session').hidden = false;
-  window.NearbyWorkspace.selectTab('connection'); notice('');
+
+function displayName(connection) {
+  const name = connection.peerName || 'Устройство';
+  return liveConnections().filter(item => item.peerName === connection.peerName).length > 1 ? `${name} · ${connection.number}` : name;
 }
-function hideInvitationId() { clearTimeout(idExpiryTimer); if ($('invitation-id')) $('invitation-id').hidden = true; }
+function renderRecipient() {
+  const connection = selectedConnection(), usable = connection && !connection.stopped;
+  $('recipient-name').classList.toggle('device-name', Boolean(usable));
+  $('recipient-name').textContent = usable ? displayName(connection) : 'Устройство не выбрано';
+  $('transport-label').textContent = usable ? connection.ready ? connection.transport === 'relay' ? 'Интернет · сквозное шифрование' : 'WebRTC · напрямую' : 'Восстанавливаем соединение' : 'Не подключено';
+  const disabled = sending || !usable || !connection.ready;
+  $('files').disabled = disabled; $('drop').classList.toggle('disabled', disabled);
+  $('disconnect-selected').disabled = !usable;
+  $('file-limit').textContent = usable && connection.link?.peerLimit ? `До ${sizes(connection.link.peerLimit)} на файл для этого получателя` : 'Выберите получателя на вкладке «Устройства».';
+  const live = liveConnections();
+  $('select-remaining').hidden = usable || live.length !== 1;
+  if (!$('select-remaining').hidden) $('remaining-name').textContent = displayName(live[0]);
+}
+function selectRecipient(id) {
+  const connection = connections.get(id);
+  if (sending || !connection || connection.stopped || !connection.ready) return;
+  selectedId = id; selectionLost = false; renderDevices();
+}
+function renderDevices() {
+  if (appClosed) return;
+  const live = liveConnections();
+  window.NearbyWorkspace.setDevices(live.length);
+  window.NearbyWorkspace.setConnected(live.some(connection => connection.ready));
+  $('connected-count').textContent = String(live.length);
+  $('connection-summary').hidden = !everConnected && !setup;
+  $('devices-transfer').disabled = sending || !selectedConnection()?.ready;
+  const signature = JSON.stringify(live.map(connection => [connection.id, connection.peerName, connection.ready, connection.transport, connection.id === selectedId, sending]));
+  if (signature !== deviceListSignature) {
+    deviceListSignature = signature;
+    $('device-list').replaceChildren();
+    for (const connection of live) {
+      const card = document.createElement('label'); card.className = 'device-target';
+      const radio = document.createElement('input'); radio.type = 'radio'; radio.name = 'send-target'; radio.value = connection.id; radio.checked = connection.id === selectedId; radio.disabled = sending || !connection.ready;
+      radio.addEventListener('change', () => selectRecipient(connection.id));
+      const info = document.createElement('span'), name = document.createElement('strong'), detail = document.createElement('small');
+      name.className = 'device-name'; name.textContent = displayName(connection);
+      detail.textContent = connection.ready ? connection.transport === 'relay' ? 'Интернет · сквозное шифрование' : 'WebRTC · напрямую' : 'Восстанавливаем соединение';
+      info.append(name, detail); card.append(radio, info); $('device-list').append(card);
+    }
+  }
+  $('devices-empty').hidden = live.length > 0;
+  if (!setup) {
+    $('connection-summary').append($('disconnect'));
+    $('disconnect').textContent = live.length ? 'Отключить выбранное устройство' : 'Новое подключение';
+    $('disconnect').disabled = live.length > 0 && !selectedConnection();
+  }
+  renderRecipient();
+}
+function hideInvitationId() { clearTimeout(idExpiryTimer); $('invitation-id').hidden = true; }
 function showInvitationId(code, expires) {
   invitationId = formatInvitationId(code);
-  if (!$('invitation-id')) return;
-  $('connection-id').replaceChildren(...invitationId.match(/[^-]+-?/g).map(group => {
-    const span = document.createElement('span'); span.textContent = group; return span;
-  }));
-  $('invitation-id').hidden = false;
-  idExpiryTimer = setTimeout(() => {
-    $('id-status').textContent = 'Срок приглашения истёк. Создайте новое подключение.';
-    $('copy-id').disabled = true;
-    $('copy').disabled = true;
-  }, Math.max(0, expires * 1000 - Date.now()));
+  $('connection-id').replaceChildren(...invitationId.match(/[^-]+-?/g).map(group => { const span = document.createElement('span'); span.textContent = group; return span; }));
+  $('id-status').textContent = 'Одно приглашение · 15 минут'; $('invitation-id').hidden = false; $('copy-id').disabled = false; $('copy').disabled = false;
+  idExpiryTimer = setTimeout(() => { $('id-status').textContent = 'Срок приглашения истёк. Создайте новое подключение.'; $('copy-id').disabled = true; $('copy').disabled = true; }, Math.max(0, expires * 1000 - Date.now()));
+}
+function lockSetup(locked) {
+  for (const control of $('start').querySelectorAll('.start-settings input,.start-settings select,.connection-entry input,.connection-entry button')) control.disabled = locked;
+}
+function showSetup(connection) {
+  setup = connection;
+  const card = $(connection.session.role === 'host' ? 'invite-card' : 'connect-card');
+  card.querySelector('.connection-entry').hidden = true; card.append($('session'));
+  $('session').querySelector('.connection-panel').append($('disconnect'));
+  $('disconnect').disabled = false; $('disconnect').textContent = 'Отменить подключение';
+  $('peer-request').hidden = true; $('approve').disabled = false;
+  $('invitation').hidden = connection.session.role !== 'host'; $('session').hidden = false;
+  lockSetup(true); window.NearbyWorkspace.selectTab('connection'); notice(''); renderDevices();
+}
+function resetSetup(connection) {
+  if (setup !== connection) return;
+  setup = null; hideInvitationId(); $('peer-request').hidden = true; $('session').hidden = true; $('start').append($('session'));
+  for (const entry of document.querySelectorAll('.connection-entry')) entry.hidden = false;
+  $('create').hidden = false; $('join-form').hidden = false; $('join-invite').hidden = true;
+  $('connect-card').querySelector('h2').textContent = 'Подключиться';
+  lockSetup(false); renderDevices();
+}
+function register(session, peerName = '') {
+  const connection = new Connection(session, {
+    receiveLimit: connection => connection.transport === 'relay' || !receiveDirectory ? MEMORY_LIMIT : DISK_LIMIT,
+    onStatus: (connection, title, detail) => { if (setup === connection) status(title, detail); renderDevices(); },
+    onNotice: (connection, message) => { if (setup === connection || selectedId === connection.id) notice(message); },
+    onPeerRequest: (connection, name) => { if (setup !== connection) return; $('peer-name').textContent = name; $('peer-request').hidden = false; $('invitation').hidden = true; hideInvitationId(); },
+    onApproved: connection => { if (setup === connection) { $('peer-request').hidden = true; $('invitation').hidden = true; hideInvitationId(); } },
+    onReady: connection => {
+      const firstReady = !connection.announced; connection.announced = true; everConnected = true;
+      if (!selectedId && !selectionLost) selectedId = connection.id;
+      if (setup === connection) { status('Устройства соединены', `Подключено: ${connection.peerName || 'Второе устройство'}. Файлы принимаются автоматически.`, true); resetSetup(connection); }
+      renderDevices(); notice('');
+      if (firstReady && liveConnections().length > 1 && !sending) window.NearbyWorkspace.selectTab('devices');
+    },
+    onOffer: (connection, spec, receivingLink) => { void showIncoming(connection, spec, receivingLink); },
+    onProgress: (connection, id, bytes, direction) => { const row = rows.get(rowKey(connection, id)); if (row) { row.progress.value = bytes; row.detail.textContent = `${direction === 'sending' ? 'Отправляем' : 'Принимаем'}: ${sizes(bytes)} / ${sizes(row.size)}`; } },
+    onComplete: complete,
+    onError: (connection, id, message) => { const row = rows.get(rowKey(connection, id)); if (row) { row.element.classList.add('error'); row.detail.textContent = message; row.actions.replaceChildren(); row.progress.remove(); row.done = true; } },
+    onClosed: (connection, message, expected) => {
+      if (appClosed) return;
+      if (selectedId === connection.id) { selectedId = null; selectionLost = true; }
+      resetSetup(connection); renderDevices(); notice(message, !expected);
+    },
+  });
+  connection.number = ++connectionNumber; connection.peerName = peerName; connections.set(connection.id, connection); return connection;
 }
 async function create() {
-  $('create').disabled = true;
+  if (setup || creating || joining || appClosed) return;
+  creating = true; lockSetup(true);
   try {
-    const mode = $('connection-mode').value;
-    const exchange = await invitationKeyExchange();
-    const result = await api('create', { name: deviceName(), mode, shortId: true, idPublicKey: exchange.publicKey }, true);
-    const idEnabled = result.shortId === true && /^\d{9}$/.test(result.id || '');
-    if (!idEnabled || result.mode !== mode) throw new Error('Обновите страницу на обоих устройствах и создайте новое приглашение.');
-    session = { room: result.room, token: result.token, role: 'host', mode, relaySecret: mode !== 'lan' ? newRelaySecret() : null, idPrivateKey: exchange.privateKey };
+    const mode = $('connection-mode').value, exchange = await invitationKeyExchange();
+    const result = await requestApi('create', { name: deviceName(), mode, shortId: true, idPublicKey: exchange.publicKey });
+    if (appClosed) { void requestApi('close', {}, { room: result.room, token: result.token }); return; }
+    if (result.shortId !== true || !/^\d{9}$/.test(result.id || '') || result.mode !== mode) throw new Error('Обновите страницу на обоих устройствах и создайте новое приглашение.');
+    const session = { room: result.room, token: result.token, role: 'host', mode, relaySecret: mode !== 'lan' ? newRelaySecret() : null, idPrivateKey: exchange.privateKey };
+    const connection = register(session);
     const url = new URL(location.pathname, location.origin); url.hash = new URLSearchParams({ room: result.room, key: result.invite, ...(mode !== 'lan' ? { mode, secret: session.relaySecret } : {}) }).toString();
-    invitation = url.href; $('share-link').value = invitation;
-    showSession();
-    showInvitationId(result.id, result.inviteExpires);
-    try { await window.QRCode.toCanvas($('qr'), invitation, { width: 190, margin: 1, errorCorrectionLevel: 'M', color: { dark: '#080d18', light: '#ffffff' } }); }
-    catch { notice('QR-код не удалось создать. Используйте ссылку-приглашение.'); }
-    poll();
-  } catch (error) { notice(error.message, true); $('create').disabled = false; }
+    invitation = url.href; $('share-link').value = invitation; showSetup(connection); showInvitationId(result.id, result.inviteExpires);
+    try { await window.QRCode.toCanvas($('qr'), invitation, { width: 190, margin: 1, errorCorrectionLevel: 'M', color: { dark: '#080d18', light: '#ffffff' } }); } catch { notice('QR-код не удалось создать. Используйте ссылку-приглашение.'); }
+    connection.start();
+  } catch (error) { notice(error.message, true); if (!setup) lockSetup(false); }
+  finally { creating = false; }
 }
 async function join(value) {
-  if (joining || session || stopped) return;
-  joining = true;
-  $('join-invite').disabled = true; $('join-form').querySelector('button').disabled = true;
+  if (joining || creating || setup || appClosed) return;
+  joining = true; lockSetup(true); $('join-invite').disabled = true;
   try {
     let invite;
     if (/^[\da-z\s-]+$/i.test(value.trim())) {
       const code = normalizeInvitationId(value);
       if (code.length === 9) {
-        const resolved = await api('resolve-id', { lookup: await shortInvitationLookup(code) }, true);
+        const resolved = await requestApi('resolve-id', { lookup: await shortInvitationLookup(code) });
+        if (connections.has(resolved.room)) throw new Error('Это приглашение уже открыто на этом устройстве.');
         const exchange = await invitationKeyExchange();
-        invite = { room: resolved.room, token: resolved.token, mode: resolved.mode, idPublicKey: exchange.publicKey,
-          relaySecret: await sharedInvitationSecret(exchange.privateKey, resolved.idPublicKey, resolved.room) };
+        invite = { room: resolved.room, token: resolved.token, mode: resolved.mode, idPublicKey: exchange.publicKey, relaySecret: await sharedInvitationSecret(exchange.privateKey, resolved.idPublicKey, resolved.room) };
       } else {
-        const credentials = await invitationCredentials(code);
-        const resolved = await api('resolve-id', { lookup: credentials.lookup }, true);
+        const credentials = await invitationCredentials(code), resolved = await requestApi('resolve-id', { lookup: credentials.lookup });
         invite = { room: resolved.room, token: credentials.token, mode: resolved.mode, relaySecret: resolved.mode !== 'lan' ? credentials.relaySecret : null };
       }
     } else invite = parseInvite(value);
-    // The encryption secret stays in memory; it must never be posted to PHP.
-    const result = await api('join', { room: invite.room, token: invite.token, name: deviceName(), ...(invite.idPublicKey ? { idPublicKey: invite.idPublicKey } : {}) }, true);
+    if (connections.has(invite.room)) throw new Error('Это приглашение уже открыто на этом устройстве.');
+    if (appClosed) return;
+    const result = await requestApi('join', { room: invite.room, token: invite.token, name: deviceName(), ...(invite.idPublicKey ? { idPublicKey: invite.idPublicKey } : {}) });
+    if (appClosed) { void requestApi('close', {}, { room: invite.room, token: result.token }); return; }
     if ((result.mode || 'lan') !== invite.mode) throw new Error('Режим приглашения изменён. Попросите новую полную ссылку.');
-    session = { room: invite.room, token: result.token, role: 'guest', mode: invite.mode, relaySecret: invite.relaySecret };
-    $('connection-mode').value = invite.mode; describeMode();
-    peerDisplayName = result.hostName;
-    joinInvite = null; history.replaceState(null, '', location.pathname);
-    $('invitation').hidden = true; showSession();
-    status('Ожидаем подтверждения', `${result.hostName}: подтвердите подключение на первом устройстве.`);
-    poll();
-  } catch (error) { notice(error.message, true); $('join-invite').hidden = !joinInvite; $('join-invite').disabled = false; $('join-form').querySelector('button').disabled = false; }
+    const connection = register({ room: invite.room, token: result.token, role: 'guest', mode: invite.mode, relaySecret: invite.relaySecret }, result.hostName);
+    $('connection-mode').value = invite.mode; describeMode(); joinInvite = null; history.replaceState(null, '', location.pathname);
+    showSetup(connection); status('Ожидаем подтверждения', `${result.hostName}: подтвердите подключение на первом устройстве.`); connection.start();
+  } catch (error) { notice(error.message, true); $('join-invite').hidden = !joinInvite; $('join-invite').disabled = false; if (!setup) lockSetup(false); }
   finally { joining = false; }
 }
-function sendSignal(message) {
-  signalChain = signalChain.then(() => api('signal', { message }));
-  signalChain.catch(error => { if (!stopped) failConnection(error.message); });
-  return signalChain;
-}
-async function startRelay() {
-  if (stopped || relayChannel) return;
-  transport = 'relay'; connectionReady = false; clearTimeout(connectionTimer); clearTimeout(disconnectTimer);
-  $('files').disabled = true; $('drop').classList.add('disabled');
-  activeChannel = null;
-  link?.close('Прямое соединение прервано. Отправьте незавершённый файл заново после восстановления связи.'); link = null;
-  // Detach callbacks before closing the unsuccessful probe.
-  const oldPeer = peer; peer = null; probeChannel?.close(); probeChannel = null; oldPeer?.close(); incomingCandidates = [];
-  status('Устанавливаем интернет-связь', 'Проверяем зашифрованное соединение с другим устройством.');
-  relayChannel = new HttpsRelayChannel({ room: session.room, secret: session.relaySecret, role: session.role, request: (action, body) => api(action, body) });
-  bindChannel(relayChannel);
-  connectionTimer = setTimeout(() => { if (!connectionReady) failConnection('Интернет-связь не установлена. Проверьте доступ к сайту и передайте приглашение целиком.'); }, 45000);
-  await relayChannel.start();
-}
-async function applyTransport(choice) {
-  if (stopped || session.mode !== 'auto' || transport === 'relay') return;
-  if (choice === 'relay') await startRelay();
-  else if (choice === 'direct' && transport === 'probing') {
-    transport = 'direct'; clearTimeout(connectionTimer);
-    if (probeChannel?.readyState !== 'open') { await recoverDirect(); return; }
-    bindChannel(probeChannel); probeChannel.activate();
-    connectionTimer = setTimeout(() => { if (!connectionReady) void recoverDirect(); }, 10000);
-  }
-}
-async function transportEvent(event) {
-  if (stopped || !['probing', 'direct'].includes(transport)) return;
-  try { const result = await api('transport', { event }); await applyTransport(result.transport); }
-  catch (error) { if (!stopped) { if ([400, 403, 404, 410].includes(error.status)) failConnection(error.message); else notice('Проверяем соединение с сайтом…'); } }
-}
-async function recoverDirect() {
-  if (stopped || session.mode !== 'auto' || !['probing', 'direct'].includes(transport)) return;
-  directBroken = true; connectionReady = false; clearTimeout(disconnectTimer);
-  $('files').disabled = true; $('drop').classList.add('disabled');
-  status('Восстанавливаем соединение', 'Прямой канал недоступен. Переключаемся на зашифрованный интернет-канал.');
-  if (recoveryRequest) return;
-  recoveryRequest = true;
-  try { await transportEvent(transport === 'direct' ? 'direct-failed' : 'fallback'); }
-  finally { recoveryRequest = false; schedulePoll(); }
-}
-function schedulePoll() {
-  clearTimeout(pollTimer);
-  if (!stopped && (!connectionReady || (session?.mode === 'auto' && transport === 'direct'))) pollTimer = setTimeout(poll, connectionReady ? 5000 : 1500);
-}
-function directChannel(channel) {
-  if (stopped || transport === 'relay') { channel.close(); return; }
-  if (session.mode !== 'auto') { bindChannel(channel); return; }
-  probeChannel = new ProbeChannel(channel);
-  probeChannel.addEventListener('open', () => { void transportEvent('direct-ready'); }, { once: true });
-  for (const type of ['close', 'error']) probeChannel.addEventListener(type, () => { if (!stopped && transport === 'probing') void recoverDirect(); });
-  if (channel.readyState === 'open') void transportEvent('direct-ready');
-}
-async function startPeer() {
-  started = true;
-  if (session.mode === 'internet') { await startRelay(); return; }
-  transport = session.mode === 'auto' ? 'probing' : 'direct';
-  if (session.mode === 'auto') connectionTimer = setTimeout(() => { void transportEvent('fallback'); }, 12500);
-  try {
-    if (!window.RTCPeerConnection) throw new Error('Локальный WebRTC недоступен в этом браузере. Выберите режим «Через интернет».');
-    status('Устанавливаем связь', session.mode === 'auto' ? 'Nearby автоматически выбирает прямое или интернет-соединение.' : 'Разрешите доступ к локальной сети, если браузер попросит.');
-    // Try host candidates; actual reachability determines the automatic choice.
-    const rtc = new RTCPeerConnection({ iceServers: [] }); peer = rtc;
-    rtc.onicecandidate = event => { if (!stopped && peer === rtc && event.candidate) sendSignal({ type: 'candidate', candidate: event.candidate.toJSON() }); };
-    rtc.ondatachannel = event => { if (peer === rtc) directChannel(event.channel); else event.channel.close(); };
-    rtc.onconnectionstatechange = () => {
-      if (stopped || peer !== rtc) return;
-      if (rtc.connectionState === 'failed') {
-        if (session.mode === 'auto') void recoverDirect();
-        else failConnection('Прямое соединение не удалось. Создайте новое подключение.');
-      }
-      if (rtc.connectionState === 'disconnected') {
-        connectionReady = false;
-        $('files').disabled = true; $('drop').classList.add('disabled');
-        status('Связь прервалась', 'Проверяем соединение с другим устройством…');
-        if (session.mode === 'auto' && !disconnectTimer) disconnectTimer = setTimeout(() => { disconnectTimer = null; if (peer === rtc && rtc.connectionState === 'disconnected') void recoverDirect(); }, 5000);
-      }
-      if (rtc.connectionState === 'connected') {
-        clearTimeout(disconnectTimer); disconnectTimer = null;
-        if (link?.peerLimit && !directBroken) ready(link.peerLimit);
-      }
-    };
-    if (session.mode !== 'auto') connectionTimer = setTimeout(() => { if (!connectionReady) failConnection('Устройства не смогли соединиться напрямую. Подключите их к одной обычной сети Wi-Fi; гостевая сеть может изолировать устройства.'); }, 45000);
-    if (session.role === 'host') {
-      directChannel(rtc.createDataChannel('nearby-files', { ordered: true }));
-      const offer = await rtc.createOffer();
-      if (stopped || peer !== rtc) return;
-      await rtc.setLocalDescription(offer);
-      if (!stopped && peer === rtc) await sendSignal({ type: 'offer', sdp: offer.sdp });
-    }
-  } catch (error) { if (!stopped && transport === 'probing') await transportEvent('fallback'); else if (!stopped && transport !== 'relay') throw error; }
-}
-async function receiveSignal(message) {
-  const rtc = peer;
-  if (stopped || !rtc || transport === 'relay') return;
-  try {
-    if (message.type === 'candidate') {
-      if (!rtc.remoteDescription) incomingCandidates.push(message.candidate); else await rtc.addIceCandidate(message.candidate);
-      return;
-    }
-    if ((message.type === 'offer' && session.role !== 'guest') || (message.type === 'answer' && session.role !== 'host')) throw new Error('Неожиданное описание соединения.');
-    await rtc.setRemoteDescription({ type: message.type, sdp: message.sdp });
-    for (const candidate of incomingCandidates) { if (stopped || peer !== rtc) return; await rtc.addIceCandidate(candidate); }
-    incomingCandidates = [];
-    if (message.type === 'offer') {
-      const answer = await rtc.createAnswer();
-      if (stopped || peer !== rtc) return;
-      await rtc.setLocalDescription(answer);
-      if (!stopped && peer === rtc) await sendSignal({ type: 'answer', sdp: answer.sdp });
-    }
-  } catch (error) { if (!stopped && transport === 'probing') await transportEvent('fallback'); else if (!stopped && peer === rtc) throw error; }
-}
-let pollFailures = 0;
-async function poll() {
-  if (stopped || !session || polling || (connectionReady && !(session.mode === 'auto' && transport === 'direct'))) return;
-  polling = true;
-  try {
-    const result = await api('poll', { after: cursor });
-    if (stopped) return;
-    pollFailures = 0;
-    if (session.role === 'host' && result.guestName && !result.approved) {
-      $('peer-name').textContent = result.guestName; $('peer-request').hidden = false; $('invitation').hidden = true; hideInvitationId();
-      peerDisplayName = result.guestName;
-      status('Разрешить подключение?', 'Убедитесь, что приглашение открыл ваш получатель.');
-    }
-    if (result.approved && !started) {
-      if (session.role === 'host' && session.idPrivateKey && result.guestPublicKey) {
-        const secret = await sharedInvitationSecret(session.idPrivateKey, result.guestPublicKey, session.room);
-        if (stopped) return;
-        session.relaySecret = secret;
-      }
-      session.idPrivateKey = null;
-      $('peer-request').hidden = true; $('invitation').hidden = true; hideInvitationId(); await startPeer();
-    }
-    if (started) await applyTransport(result.transport);
-    if (transport === 'direct' && directBroken) await recoverDirect();
-    if (started && transport !== 'relay') for (const message of result.messages) await receiveSignal(message.body);
-    cursor = result.cursor;
-  } catch (error) {
-    if ([400, 403, 404, 410].includes(error.status) || (++pollFailures >= 4 && !connectionReady)) { failConnection(error.message); return; }
-    notice('Проверяем соединение с сайтом…');
-  } finally { polling = false; schedulePoll(); }
-}
-function ready(limit) {
-  if (stopped || (transport === 'direct' && directBroken)) return;
-  connectionReady = true;
-  void reportUsage();
-  clearTimeout(connectionTimer); if (!polling) schedulePoll(); notice('');
-  status('Устройства соединены', `Подключено: ${peerDisplayName || 'Второе устройство'}. Файлы принимаются автоматически.`, true);
-  window.NearbyWorkspace.setConnected(true);
-  $('transport-label').textContent = transport === 'relay' ? 'Интернет · сквозное шифрование' : 'WebRTC · напрямую';
-  $('files').disabled = sending; $('drop').classList.toggle('disabled', sending);
-  $('file-limit').textContent = `До ${sizes(limit)} на файл для этого получателя`;
-}
-function bindChannel(channel) {
-  activeChannel = channel;
-  const open = () => {
-    if (stopped || activeChannel !== channel) return;
-    link = new FileLink(channel, { maxReceive: transport === 'relay' || !receiveDirectory ? MEMORY_LIMIT : DISK_LIMIT,
-      onReady: limit => { if (activeChannel === channel) ready(limit); },
-      onOffer: spec => { if (activeChannel === channel) void showIncoming(spec); },
-      onProgress: (id, bytes, direction) => { const row = rows.get(id); if (row) { row.progress.value = bytes; row.detail.textContent = `${direction === 'sending' ? 'Отправляем' : 'Принимаем'}: ${sizes(bytes)} / ${sizes(row.size)}`; } },
-      onComplete: complete,
-      onError: (id, message) => { const row = rows.get(id); if (row) { row.element.classList.add('error'); row.detail.textContent = message; row.actions.replaceChildren(); row.progress.remove(); row.done = true; } }
-    });
-  };
-  if (channel.readyState === 'open') open(); else channel.addEventListener('open', open, { once: true });
-  for (const type of ['close', 'error']) channel.addEventListener(type, () => {
-    if (stopped || activeChannel !== channel) return;
-    if (session.mode === 'auto' && transport === 'direct') void recoverDirect();
-    else failConnection(channel.error || 'Соединение с другим устройством закрыто. Создайте новое подключение.');
-  });
-}
-function rowFor(spec, direction) {
+function rowFor(connection, spec, direction) {
   if (direction === 'incoming') $('empty').hidden = true;
   const element = document.createElement('article'); element.className = 'transfer'; element.dataset.id = spec.id;
   const title = document.createElement('div'); title.className = 'transfer-title'; title.textContent = spec.name;
@@ -345,11 +235,12 @@ function rowFor(spec, direction) {
   const detail = document.createElement('div'); detail.className = 'transfer-detail'; detail.textContent = direction === 'incoming' ? 'Принимаем автоматически…' : 'Подготавливаем передачу…';
   const progress = document.createElement('progress'); progress.max = spec.size || 1; progress.value = 0; progress.setAttribute('aria-label', 'Прогресс передачи');
   const actions = document.createElement('div'); actions.className = 'transfer-actions';
-  element.append(title, meta, detail, progress, actions); $(direction === 'incoming' ? 'transfers' : 'outgoing-transfers').prepend(element);
-  const row = { element, detail, progress, actions, size: spec.size, done: false, direction }; rows.set(spec.id, row); return row;
+  const peerName = document.createElement('div'); peerName.className = 'transfer-peer'; peerName.textContent = displayName(connection);
+  element.append(title, peerName, meta, detail, progress, actions); $(direction === 'incoming' ? 'transfers' : 'outgoing-transfers').prepend(element);
+  const row = { element, detail, progress, actions, size: spec.size, done: false, direction, connection }; rows.set(rowKey(connection, spec.id), row); return row;
 }
 function button(label, action, primary = false) { const b = document.createElement('button'); b.className = `button ${primary ? 'primary' : 'secondary'}`; b.textContent = label; b.onclick = action; return b; }
-function cancelButton(id, actions) { actions.append(button('Отменить', () => link.cancel(id))); }
+function cancelButton(fileLink, id, actions) { actions.append(button('Отменить', () => fileLink.cancel(id))); }
 function memorySink(spec, row) {
   if (spec.size > MEMORY_LIMIT) throw new Error('Для обычного скачивания доступны файлы до 100 МиБ. Для больших файлов используйте Chrome/Edge на ПК с разрешённой записью на диск.');
   if (bufferedBytes + spec.size > MEMORY_LIMIT) throw new Error('Сначала сохраните принятые файлы и нажмите «Убрать из памяти». Вкладка хранит не более 100 МиБ.');
@@ -358,9 +249,8 @@ function memorySink(spec, row) {
   row.releaseMemory = () => { if (reserved) { bufferedBytes -= spec.size; reserved = false; } };
   return { write: async data => { parts.push(data); }, close: async () => { const blob = new Blob(parts, { type: 'application/octet-stream' }); parts = []; return blob; }, abort: async () => { parts = []; row.releaseMemory(); } };
 }
-async function showIncoming(spec) {
-  const receivingLink = link;
-  const row = rowFor(spec, 'incoming');
+async function showIncoming(connection, spec, receivingLink) {
+  const row = rowFor(connection, spec, 'incoming');
   window.NearbyWorkspace.incoming();
   try {
     let sink;
@@ -371,45 +261,27 @@ async function showIncoming(spec) {
       sink = { write: data => writable.write(data), close: async () => { await writable.close(); return null; }, abort: async () => { await writable.abort(); await receiveDirectory.removeEntry(destination); } };
     } else sink = memorySink(spec, row);
     await receivingLink.accept(spec.id, sink);
-    if (!row.done) cancelButton(spec.id, row.actions);
+    if (!row.done) cancelButton(receivingLink, spec.id, row.actions);
   } catch (error) { receivingLink.cancel(spec.id, error.message || 'Не удалось сохранить файл.'); }
 }
 
-for (const button of document.querySelectorAll('[data-choose-folder]')) {
-  button.hidden = !diskSupported;
-  button.addEventListener('click', async () => {
+for (const control of document.querySelectorAll('[data-choose-folder]')) {
+  control.hidden = !diskSupported;
+  control.addEventListener('click', async () => {
     if (Array.from(rows.values()).some(row => !row.done)) { notice('Дождитесь завершения текущей передачи.'); return; }
     try {
       receiveDirectory = await window.showDirectoryPicker({ mode: 'readwrite' });
       for (const name of document.querySelectorAll('.receive-folder-name')) name.textContent = receiveDirectory.name ? `Папка: ${receiveDirectory.name}` : 'Папка выбрана.';
       $('save-hint').textContent = 'Файлы сохраняются автоматически в выбранную папку.';
-      if (link?.peerLimit && transport !== 'relay') notice('Папка выбрана. Для файлов больше 100 МиБ создайте новое подключение.');
+      if (liveConnections().some(connection => connection.link?.peerLimit && connection.transport !== 'relay')) notice('Папка выбрана. Для файлов больше 100 МиБ создайте новое подключение.');
     } catch (error) { if (error.name !== 'AbortError') notice('Выбор папки недоступен. Файлы будут загружаться через браузер.'); }
   });
 }
-async function reportTransfer(id, size) {
-  return reportStatistics('record-transfer', { id, size });
-}
-async function reportUsage() {
-  return reportStatistics('record-usage');
-}
-async function reportStatistics(action, extra = {}) {
-  // Snapshot credentials; statistics failures must never fail a completed file.
-  const body = JSON.stringify({ action, room: session.room, token: session.token, ...extra });
-  for (const delay of [0, 1500, 5000]) {
-    if (delay) await new Promise(resolve => setTimeout(resolve, delay));
-    try {
-      const response = await fetch('api.php', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer', keepalive: true, signal: AbortSignal.timeout(10000), body });
-      if (response.ok) { document.dispatchEvent(new Event(action === 'record-usage' ? 'nearby-connection-complete' : 'nearby-transfer-complete')); return; }
-      if (response.status < 500 && response.status !== 429) return;
-    } catch { /* Retry transient failures while the tab remains open. */ }
-  }
-}
-function complete(id, direction, blob) {
-  const row = rows.get(id); if (!row || row.done) return;
+function complete(connection, id, direction, blob) {
+  const row = rows.get(rowKey(connection, id)); if (!row || row.done) return;
   row.done = true; row.progress.value = row.progress.max; row.actions.replaceChildren();
   row.detail.textContent = direction === 'sent' ? 'Передан получателю.' : blob ? 'Файл принят. Загрузка началась автоматически.' : 'Сохранён в выбранную папку.';
-  if (direction === 'received') void reportTransfer(id, row.size);
+  if (direction === 'received') void connection.reportStatistics('record-transfer', { id, size: row.size });
   if (blob) {
     const url = URL.createObjectURL(blob); objectUrls.add(url);
     const save = document.createElement('a'); save.className = 'button primary'; save.href = url; save.download = row.element.querySelector('.transfer-title').textContent; save.textContent = 'Сохранить файл ↓'; row.actions.append(save);
@@ -420,76 +292,75 @@ function complete(id, direction, blob) {
   }
 }
 async function sendFiles(files) {
-  if (!connectionReady || !link?.peerLimit || sending || stopped) return;
-  const sendingLink = link;
-  sending = true; $('files').disabled = true; $('drop').classList.add('disabled');
+  const connection = selectedConnection(), fileLink = connection?.link;
+  if (sending || appClosed || !connection?.ready || !fileLink?.peerLimit) return;
+  sending = true; renderDevices();
   try {
     for (const file of files) {
-      if (stopped || link !== sendingLink || !connectionReady) break;
+      if (appClosed || connection.stopped || !connection.ready || connection.link !== fileLink) break;
       const id = crypto.randomUUID();
       try {
-        validateFileSpec({ id, name: file.name, size: file.size }, link.peerLimit);
-        const row = rowFor({ id, name: file.name, size: file.size }, 'outgoing'); cancelButton(id, row.actions);
-        await sendingLink.sendFile(file, id);
-      } catch (error) { if (!rows.has(id)) notice(`${file.name}: ${error.message}`, true); }
+        validateFileSpec({ id, name: file.name, size: file.size }, fileLink.peerLimit);
+        const row = rowFor(connection, { id, name: file.name, size: file.size }, 'outgoing'); cancelButton(fileLink, id, row.actions);
+        await fileLink.sendFile(file, id);
+      } catch (error) { if (!rows.has(rowKey(connection, id))) notice(`${file.name}: ${error.message}`, true); }
     }
-  } finally { sending = false; $('files').value = ''; if (!stopped && connectionReady && link?.peerLimit) { $('files').disabled = false; $('drop').classList.remove('disabled'); } }
-}
-function failConnection(message) { notice(message, true); status('Соединение завершено', 'Нажмите «Новое подключение», чтобы попробовать снова.'); stopLocal(); }
-function stopLocal() {
-  stopped = true; connectionReady = false; clearTimeout(pollTimer); clearTimeout(connectionTimer); clearTimeout(disconnectTimer);
-  hideInvitationId();
-  link?.close(); probeChannel?.close(); peer?.close(); relayChannel?.close(); if (session) { session.relaySecret = null; session.idPrivateKey = null; }
-  $('files').disabled = true; $('drop').classList.add('disabled');
-  window.NearbyWorkspace.setConnected(false);
-  $('peer-request').hidden = true; $('invitation').hidden = true; $('transport-label').textContent = 'Не подключено';
-  $('disconnect').textContent = 'Новое подключение';
+  } finally { sending = false; $('files').value = ''; renderDevices(); }
 }
 $('create').onclick = create;
-$('join-form').onsubmit = event => { event.preventDefault(); join($('invite-input').value.trim()); };
+$('join-form').onsubmit = event => { event.preventDefault(); void join($('invite-input').value.trim()); };
 $('join-invite').onclick = () => join(joinInvite);
-$('approve').onclick = async () => { $('approve').disabled = true; try { await api('approve'); $('peer-request').hidden = true; } catch (error) { notice(error.message, true); $('approve').disabled = false; } };
-$('reject').onclick = async () => { try { await api('close'); } catch {} failConnection('Подключение отклонено.'); };
+$('approve').onclick = async () => {
+  const connection = setup; if (!connection) return; $('approve').disabled = true;
+  try { await connection.api('approve'); if (setup === connection) $('peer-request').hidden = true; }
+  catch (error) { notice(error.message, true); if (setup === connection) $('approve').disabled = false; }
+};
+$('reject').onclick = () => setup?.disconnect();
+$('disconnect').onclick = () => { const connection = setup || selectedConnection(); if (connection) void connection.disconnect(); else { window.NearbyWorkspace.selectTab('connection'); $('invite-input').focus(); } };
+$('disconnect-selected').onclick = () => selectedConnection()?.disconnect();
+$('select-remaining').onclick = () => { const live = liveConnections(); if (live.length === 1) selectRecipient(live[0].id); };
+$('devices-transfer').onclick = () => window.NearbyWorkspace.selectTab('transfer');
 $('copy').onclick = async () => {
   try { await navigator.clipboard.writeText(invitation); $('copy').textContent = 'Ссылка скопирована ✓'; }
   catch { $('share-link').focus(); $('share-link').select(); notice('Скопируйте выделенную ссылку.'); }
 };
-$('copy-id')?.addEventListener('click', async () => {
+$('copy-id').onclick = async () => {
   try { await navigator.clipboard.writeText(invitationId); $('copy-id').textContent = 'ID скопирован ✓'; }
-  catch {
-    const selection = getSelection(), range = document.createRange(); range.selectNodeContents($('connection-id'));
-    selection.removeAllRanges(); selection.addRange(range); notice('Скопируйте выделенный ID.');
-  }
-});
-$('disconnect').onclick = async () => { if (stopped) { location.href = location.pathname; return; } try { await api('close'); } catch {} failConnection('Соединение завершено. Принятые файлы можно сохранить ниже.'); };
-$('files').onchange = event => sendFiles(Array.from(event.target.files));
-for (const type of ['dragover', 'dragleave', 'drop']) $('drop').addEventListener(type, event => { event.preventDefault(); $('drop').classList.toggle('drag', type === 'dragover' && !sending); if (type === 'drop') sendFiles(Array.from(event.dataTransfer.files)); });
+  catch { const selection = getSelection(), range = document.createRange(); range.selectNodeContents($('connection-id')); selection.removeAllRanges(); selection.addRange(range); notice('Скопируйте выделенный ID.'); }
+};
+$('files').onchange = event => void sendFiles(Array.from(event.target.files));
+for (const type of ['dragover', 'dragleave', 'drop']) $('drop').addEventListener(type, event => { event.preventDefault(); $('drop').classList.toggle('drag', type === 'dragover' && !sending); if (type === 'drop') void sendFiles(Array.from(event.dataTransfer.files)); });
 document.addEventListener('dragover', event => event.preventDefault()); document.addEventListener('drop', event => event.preventDefault());
 window.addEventListener('beforeunload', event => { if (sending || Array.from(rows.values()).some(row => !row.done)) { event.preventDefault(); event.returnValue = ''; } });
-window.addEventListener('pagehide', () => { stopLocal(); for (const url of objectUrls) URL.revokeObjectURL(url); });
+window.addEventListener('pagehide', () => {
+  appClosed = true; clearTimeout(idExpiryTimer);
+  for (const connection of connections.values()) connection.stop('Соединение закрыто.', true);
+  for (const url of objectUrls) URL.revokeObjectURL(url);
+});
 window.addEventListener('hashchange', () => {
-  if (!session && new URLSearchParams(location.hash.slice(1)).has('room')) location.reload();
+  if (setup || creating || joining || appClosed) return;
+  if (new URLSearchParams(location.hash.slice(1)).has('room')) openInvitation(location.href);
 });
 $('save-hint').textContent = diskSupported ? 'Приём автоматический. Можно один раз выбрать папку получения.' : 'Приём автоматический · до 100 МиБ. Сохраните файлы перед закрытием.';
 function describeMode() {
-  const internet = $('connection-mode').value === 'internet';
-  const automatic = $('connection-mode').value === 'auto';
+  const internet = $('connection-mode').value === 'internet', automatic = $('connection-mode').value === 'auto';
   $('mode-help').textContent = automatic ? 'Соединение выбирается автоматически: напрямую, а если недоступно — через зашифрованный интернет-канал (до 100 МиБ на файл).' : internet ? 'Для разных Wi-Fi и мобильного интернета. До 100 МиБ на файл; оба устройства остаются онлайн. Зашифрованные части временно проходят через сервер.' : 'Для устройств в одной доступной локальной сети. Файлы идут напрямую через WebRTC.';
   $('web-discovery-hint').hidden = internet || automatic;
 }
 $('connection-mode').addEventListener('change', describeMode);
 const initialParams = new URLSearchParams(location.hash.slice(1));
 if (['lan', 'internet', 'auto'].includes(initialParams.get('mode'))) $('connection-mode').value = initialParams.get('mode');
-describeMode();
+describeMode(); renderDevices();
 if (!window.isSecureContext || !crypto.subtle) { notice('Откройте Nearby по HTTPS в современном браузере. На Windows рекомендуем Chrome или Edge.', true); $('create').disabled = true; $('join-form').hidden = true; }
-else if (initialParams.has('room')) {
+else if (initialParams.has('room')) openInvitation(location.href);
+else if (location.hash) history.replaceState(null, '', location.pathname);
+function openInvitation(value) {
   try {
-    const invite = parseInvite(location.href);
-    $('connection-mode').value = invite.mode; describeMode();
-    joinInvite = location.href; history.replaceState(null, '', location.pathname);
-    $('create').hidden = true; $('join-form').hidden = true; document.querySelector('.divider').hidden = true;
-    $('join-invite').hidden = !confirmInvitation; $('start').querySelector('h2').textContent = 'Вас пригласили в Nearby';
+    const invite = parseInvite(value); $('connection-mode').value = invite.mode; describeMode();
+    joinInvite = value; history.replaceState(null, '', location.pathname);
+    $('create').hidden = true; $('join-form').hidden = true; $('join-invite').hidden = !confirmInvitation; $('join-invite').disabled = false;
+    $('connect-card').querySelector('h2').textContent = 'Вас пригласили в Nearby';
+    window.NearbyWorkspace.selectTab('connection');
     if (!confirmInvitation) void join(joinInvite);
-  }
-  catch (error) { notice(error.message, true); history.replaceState(null, '', location.pathname); }
-} else if (location.hash) history.replaceState(null, '', location.pathname);
+  } catch (error) { notice(error.message, true); history.replaceState(null, '', location.pathname); }
+}

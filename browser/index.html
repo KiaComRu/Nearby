@@ -13,7 +13,7 @@
   <meta name="apple-mobile-web-app-title" content="Nearby">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <link rel="stylesheet" href="pwa.css">
-<script src="tabs.js?v=tabs-1" defer="">
+<script src="tabs.js?v=devices-1" defer="">
 </script>
 <script defer="" src="pwa.js">
 </script>
@@ -22,15 +22,15 @@
   <link rel="apple-touch-icon" href="apple-touch-icon.png" sizes="180x180">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="localize.css?v=tabs-1">
-<script defer="" src="localize.js?v=d92c0d13dc46">
+<script defer="" src="localize.js?v=570e533a7b1f">
 </script>
   <script defer="" src="vendor/qrcode.js">
 </script>
-<script type="module" src="app-0.5.4.js?v=9954ca3d2a39">
+<script type="module" src="app-0.5.5.js?v=d9181265cc7a">
 </script>
 <script defer="" src="statistics.js?v=uses-1">
 </script>
-<link rel="stylesheet" href="workspace.css?v=7c878bde2a11">
+<link rel="stylesheet" href="workspace.css?v=40d80050fa44">
 </head>
 <body class="compact-app web-app">
   <header class="header">
@@ -71,11 +71,13 @@
 
     <nav class="workspace-tabs" role="tablist" aria-label="Работа с устройствами">
 <button id="tab-connection" type="button" data-pane="connection" role="tab" aria-controls="connection-pane" aria-selected="true">Подключение</button>
+<button id="tab-devices" type="button" hidden="" disabled="" data-pane="devices" role="tab" aria-controls="devices-pane" aria-selected="false">Устройства</button>
 <button id="tab-transfer" type="button" disabled="" data-pane="transfer" role="tab" aria-controls="transfer-pane" aria-selected="false">Передача</button>
 </nav>
 <div class="tab-panels">
 <section id="connection-pane" class="tab-panel" role="tabpanel" aria-labelledby="tab-connection">
 <section id="start" class="panel start-panel">
+<div id="connection-summary" class="connection-summary" hidden=""><span><span>Подключено устройств:</span> <strong id="connected-count">0</strong></span></div>
 <div class="start-settings">
 <details id="connection-settings">
 <summary>Дополнительные настройки</summary>
@@ -162,8 +164,18 @@
       </aside>
 </section>
 </section>
+<section id="devices-pane" class="tab-panel" hidden="" role="tabpanel" aria-labelledby="tab-devices">
+<section class="panel devices-panel">
+<h2>Подключённые устройства</h2>
+<p class="muted">Выберите получателя, затем откройте вкладку «Передача».</p>
+<div id="device-list" class="device-list" role="radiogroup" aria-label="Получатель файлов"></div>
+<p id="devices-empty" class="muted">Нет подключённых устройств</p>
+<button id="devices-transfer" class="button primary" type="button">Перейти к передаче</button>
+</section>
+</section>
 <section id="transfer-pane" class="tab-panel" hidden="" role="tabpanel" aria-labelledby="tab-transfer">
 <div id="transfer-workspace">
+<div class="recipient-bar"><div><span>Получатель:</span> <strong id="recipient-name">Устройство не выбрано</strong></div><button id="disconnect-selected" class="button quiet" type="button" disabled="">Отключить</button><button id="select-remaining" class="button secondary" type="button" hidden=""><span>Выбрать устройство:</span> <span id="remaining-name" class="device-name"></span></button></div>
 <div class="transfer-columns">
 <section class="panel">
 <h2>Отправка файлов</h2>

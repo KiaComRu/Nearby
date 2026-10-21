@@ -137,4 +137,22 @@ body.compact-app{height:100vh;height:100dvh;min-height:0;display:flex;flex-direc
 .web-app #connection-settings{align-self:center;min-width:0;font-size:12px}.web-app #connection-settings summary{cursor:pointer;color:var(--muted)}.web-app #connection-settings[open]{align-self:start}.web-app #connection-settings select{width:100%;max-width:100%}
 .web-app .invitation-confirmation{display:flex;align-items:flex-start;gap:8px;line-height:1.4;margin-top:10px}.web-app #confirm-invitation{width:16px;height:16px;min-height:0;flex:0 0 16px;padding:0;margin:1px 0 0;accent-color:var(--cyan)}
 
-.web-app[data-active-pane="transfer"] #transfer-statistics{display:none}
+.web-app:not([data-active-pane="connection"]) #transfer-statistics{display:none}
+.web-app .connection-summary{display:flex;align-items:center;justify-content:space-between;gap:6px 12px;flex-wrap:wrap;font-size:12px;color:var(--muted);flex-shrink:0}
+.web-app .connection-summary strong{color:var(--cyan)}
+.web-app .devices-panel{display:flex;flex-direction:column;gap:10px;min-height:0;flex:1;overflow:hidden}
+.web-app .device-list{display:flex;flex-direction:column;gap:10px;overflow:auto;min-height:0;flex:1;padding:2px}
+.web-app .device-target{display:flex;align-items:center;gap:12px;cursor:pointer;border:1px solid var(--line);border-radius:12px;padding:14px;margin:0;flex-shrink:0;background:#77e8ff05}
+.web-app .device-target:has(input:checked){border-color:var(--cyan);background:#77e8ff10}
+.web-app .device-target:has(input:focus-visible){outline:2px solid var(--cyan);outline-offset:2px}
+.web-app .device-target input[type=radio]{width:18px;height:18px;flex:0 0 18px;min-height:0;margin:0;padding:0;accent-color:var(--cyan)}
+.web-app .device-target>span{display:flex;flex-direction:column;gap:5px;min-width:0}
+.web-app .device-name,.web-app #recipient-name{overflow-wrap:anywhere}
+.web-app .device-target strong{font-size:15px}.web-app .device-target small{font-size:11px;color:var(--muted)}
+.web-app #devices-transfer{align-self:flex-start;flex-shrink:0}
+.web-app .recipient-bar{display:flex;align-items:center;gap:6px 12px;flex-wrap:wrap;flex-shrink:0;font-size:12px}
+.web-app .recipient-bar>div{flex:1;min-width:0;color:var(--muted)}.web-app #recipient-name{color:var(--cyan)}
+.web-app .recipient-bar button{font-size:11px;padding:5px 10px;min-height:30px}
+.web-app #select-remaining{width:100%;white-space:normal;text-align:left}.web-app #select-remaining span{margin:0}
+.web-app .transfer-peer{font-size:11px;color:var(--cyan);overflow-wrap:anywhere}
+@media(max-width:550px){.web-app .workspace-tabs button{min-width:0;padding:6px 10px;font-size:12px;flex:1}.web-app .recipient-bar{font-size:11px}.web-app .device-target{padding:12px}}
