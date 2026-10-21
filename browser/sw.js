@@ -1,7 +1,7 @@
 // Generated as sw.js by build-pwa.mjs. Only the public offline screen is cached.
 const ROOT = new URL('./', self.location.href);
 const PREFIX = `nearby-pwa-offline-${encodeURIComponent(ROOT.pathname)}-`;
-const CACHE = PREFIX + '47b9235723cfd2ff3a64';
+const CACHE = PREFIX + 'cfe886f59350830d25df';
 const ASSETS = ['offline.html', 'pwa-offline.css', 'pwa-offline.js'].map(name => new URL(name, ROOT).href);
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS.map(url => new Request(url, { cache: 'reload', credentials: 'omit' })))));

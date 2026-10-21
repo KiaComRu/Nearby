@@ -2,7 +2,8 @@ import { build } from 'esbuild';
 import { createHash } from 'node:crypto';
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import './build-pwa.mjs';
+import { installMetrika } from '../site/build-metrika.mjs';
+import { metrikaCsp } from '../site/metrika-policy.mjs';
 const root = fileURLToPath(new URL('./', import.meta.url));
 await mkdir(root + 'vendor', { recursive: true });
 await build({ entryPoints: [root + '../node_modules/qrcode/lib/browser.js'], bundle: true, platform: 'browser', format: 'iife', globalName: 'QRCode', minify: true, outfile: root + 'vendor/qrcode.js', legalComments: 'inline' });
@@ -22,4 +23,8 @@ await writeFile(root + 'index.html',html
   .replace(/href="workspace\.css(?:\?[^"\s]*)?"/, `href="workspace.css?v=${styleRevision}"`)
   .replace(/(?:src|href)="(file-presentation\.(?:js|css))(?:\?[^"\s]*)?"/g, (match, name) => `${name.endsWith('.js') ? 'src' : 'href'}="${name}?v=${presentationRevision}"`)
   .replace(/src="localize\.js(?:\?[^"\s]*)?"/, `src="localize.js?v=${localeRevision}"`));
-console.log('Browser QR bundle built locally; no external QR service.');
+const policy = await readFile(root + '.htaccess','utf8');
+await writeFile(root + '.htaccess',policy.replace(/^Header always set Content-Security-Policy ".*"$/m, `Header always set Content-Security-Policy "${metrikaCsp}"`));
+await installMetrika(root,['index.html','offline.html'],{base:'./'});
+await import('./build-pwa.mjs');
+console.log('Browser QR bundle and CSP-compatible Metrika counter built.');
