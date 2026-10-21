@@ -14,6 +14,7 @@ let invitationId = null, idExpiryTimer;
 let bufferedBytes = 0;
 let relayChannel = null;
 let transport = null, probeChannel = null, activeChannel = null, connectionReady = false;
+let disconnectTimer, polling = false, directBroken = false, recoveryRequest = false;
 let peerDisplayName = '';
 const sizes = n => n < 1024 ? `${n} Б` : n < 1024 ** 2 ? `${(n / 1024).toFixed(1)} КиБ` : n < 1024 ** 3 ? `${(n / 1024 ** 2).toFixed(1)} МиБ` : `${(n / 1024 ** 3).toFixed(1)} ГиБ`;
 function notice(text, error = false) { $('notice').textContent = text; $('notice').classList.toggle('error', error); $('notice').hidden = !text; }
@@ -145,7 +146,10 @@ function sendSignal(message) {
 }
 async function startRelay() {
   if (stopped || relayChannel) return;
-  transport = 'relay'; clearTimeout(connectionTimer);
+  transport = 'relay'; connectionReady = false; clearTimeout(connectionTimer); clearTimeout(disconnectTimer);
+  $('files').disabled = true; $('drop').classList.add('disabled');
+  activeChannel = null;
+  link?.close('Прямое соединение прервано. Отправьте незавершённый файл заново после восстановления связи.'); link = null;
   // Detach callbacks before closing the unsuccessful probe.
   const oldPeer = peer; peer = null; probeChannel?.close(); probeChannel = null; oldPeer?.close(); incomingCandidates = [];
   status('Устанавливаем интернет-связь', 'Проверяем зашифрованное соединение с другим устройством.');
@@ -155,26 +159,40 @@ async function startRelay() {
   await relayChannel.start();
 }
 async function applyTransport(choice) {
-  if (stopped || session.mode !== 'auto' || transport !== 'probing') return;
+  if (stopped || session.mode !== 'auto' || transport === 'relay') return;
   if (choice === 'relay') await startRelay();
-  else if (choice === 'direct') {
+  else if (choice === 'direct' && transport === 'probing') {
     transport = 'direct'; clearTimeout(connectionTimer);
-    if (probeChannel?.readyState !== 'open') { failConnection('Прямое соединение прервано. Создайте новое подключение.'); return; }
+    if (probeChannel?.readyState !== 'open') { await recoverDirect(); return; }
     bindChannel(probeChannel); probeChannel.activate();
-    connectionTimer = setTimeout(() => { if (!connectionReady) failConnection('Устройство не ответило вовремя.'); }, 45000);
+    connectionTimer = setTimeout(() => { if (!connectionReady) void recoverDirect(); }, 10000);
   }
 }
 async function transportEvent(event) {
-  if (stopped || transport !== 'probing') return;
+  if (stopped || !['probing', 'direct'].includes(transport)) return;
   try { const result = await api('transport', { event }); await applyTransport(result.transport); }
   catch (error) { if (!stopped) { if ([400, 403, 404, 410].includes(error.status)) failConnection(error.message); else notice('Проверяем соединение с сайтом…'); } }
+}
+async function recoverDirect() {
+  if (stopped || session.mode !== 'auto' || !['probing', 'direct'].includes(transport)) return;
+  directBroken = true; connectionReady = false; clearTimeout(disconnectTimer);
+  $('files').disabled = true; $('drop').classList.add('disabled');
+  status('Восстанавливаем соединение', 'Прямой канал недоступен. Переключаемся на зашифрованный интернет-канал.');
+  if (recoveryRequest) return;
+  recoveryRequest = true;
+  try { await transportEvent(transport === 'direct' ? 'direct-failed' : 'fallback'); }
+  finally { recoveryRequest = false; schedulePoll(); }
+}
+function schedulePoll() {
+  clearTimeout(pollTimer);
+  if (!stopped && (!connectionReady || (session?.mode === 'auto' && transport === 'direct'))) pollTimer = setTimeout(poll, connectionReady ? 5000 : 1500);
 }
 function directChannel(channel) {
   if (stopped || transport === 'relay') { channel.close(); return; }
   if (session.mode !== 'auto') { bindChannel(channel); return; }
   probeChannel = new ProbeChannel(channel);
   probeChannel.addEventListener('open', () => { void transportEvent('direct-ready'); }, { once: true });
-  for (const type of ['close', 'error']) probeChannel.addEventListener(type, () => { if (!stopped && transport === 'probing') void transportEvent('fallback'); });
+  for (const type of ['close', 'error']) probeChannel.addEventListener(type, () => { if (!stopped && transport === 'probing') void recoverDirect(); });
   if (channel.readyState === 'open') void transportEvent('direct-ready');
 }
 async function startPeer() {
@@ -192,11 +210,19 @@ async function startPeer() {
     rtc.onconnectionstatechange = () => {
       if (stopped || peer !== rtc) return;
       if (rtc.connectionState === 'failed') {
-        if (transport === 'probing') void transportEvent('fallback');
+        if (session.mode === 'auto') void recoverDirect();
         else failConnection('Прямое соединение не удалось. Создайте новое подключение.');
       }
-      if (rtc.connectionState === 'disconnected' && connectionReady) { $('files').disabled = true; status('Связь прервалась', 'Передача может быть прервана. Если связь не восстановится, создайте новое подключение.'); }
-      if (rtc.connectionState === 'connected' && connectionReady) ready(link.peerLimit);
+      if (rtc.connectionState === 'disconnected') {
+        connectionReady = false;
+        $('files').disabled = true; $('drop').classList.add('disabled');
+        status('Связь прервалась', 'Проверяем соединение с другим устройством…');
+        if (session.mode === 'auto' && !disconnectTimer) disconnectTimer = setTimeout(() => { disconnectTimer = null; if (peer === rtc && rtc.connectionState === 'disconnected') void recoverDirect(); }, 5000);
+      }
+      if (rtc.connectionState === 'connected') {
+        clearTimeout(disconnectTimer); disconnectTimer = null;
+        if (link?.peerLimit && !directBroken) ready(link.peerLimit);
+      }
     };
     if (session.mode !== 'auto') connectionTimer = setTimeout(() => { if (!connectionReady) failConnection('Устройства не смогли соединиться напрямую. Подключите их к одной обычной сети Wi-Fi; гостевая сеть может изолировать устройства.'); }, 45000);
     if (session.role === 'host') {
@@ -230,7 +256,8 @@ async function receiveSignal(message) {
 }
 let pollFailures = 0;
 async function poll() {
-  if (stopped || !session || connectionReady) return;
+  if (stopped || !session || polling || (connectionReady && !(session.mode === 'auto' && transport === 'direct'))) return;
+  polling = true;
   try {
     const result = await api('poll', { after: cursor });
     if (stopped) return;
@@ -242,19 +269,19 @@ async function poll() {
     }
     if (result.approved && !started) { $('peer-request').hidden = true; $('invitation').hidden = true; hideInvitationId(); await startPeer(); }
     if (started) await applyTransport(result.transport);
+    if (transport === 'direct' && directBroken) await recoverDirect();
     if (started && transport !== 'relay') for (const message of result.messages) await receiveSignal(message.body);
     cursor = result.cursor;
   } catch (error) {
-    if ([400, 403, 404, 410].includes(error.status) || ++pollFailures >= 4) { failConnection(error.message); return; }
+    if ([400, 403, 404, 410].includes(error.status) || (++pollFailures >= 4 && !connectionReady)) { failConnection(error.message); return; }
     notice('Проверяем соединение с сайтом…');
-  }
-  if (!stopped && !connectionReady) pollTimer = setTimeout(poll, 1500);
+  } finally { polling = false; schedulePoll(); }
 }
 function ready(limit) {
-  if (stopped) return;
+  if (stopped || (transport === 'direct' && directBroken)) return;
   connectionReady = true;
   void reportUsage();
-  clearTimeout(connectionTimer); clearTimeout(pollTimer); notice('');
+  clearTimeout(connectionTimer); if (!polling) schedulePoll(); notice('');
   status('Устройства соединены', `Подключено: ${peerDisplayName || 'Второе устройство'}. Файлы принимаются автоматически.`, true);
   window.NearbyWorkspace.setConnected(true);
   $('transport-label').textContent = transport === 'relay' ? 'Интернет · сквозное шифрование' : 'WebRTC · напрямую';
@@ -266,15 +293,19 @@ function bindChannel(channel) {
   const open = () => {
     if (stopped || activeChannel !== channel) return;
     link = new FileLink(channel, { maxReceive: transport === 'relay' || !receiveDirectory ? MEMORY_LIMIT : DISK_LIMIT,
-      onReady: ready,
-      onOffer: showIncoming,
+      onReady: limit => { if (activeChannel === channel) ready(limit); },
+      onOffer: spec => { if (activeChannel === channel) void showIncoming(spec); },
       onProgress: (id, bytes, direction) => { const row = rows.get(id); if (row) { row.progress.value = bytes; row.detail.textContent = `${direction === 'sending' ? 'Отправляем' : 'Принимаем'}: ${sizes(bytes)} / ${sizes(row.size)}`; } },
       onComplete: complete,
       onError: (id, message) => { const row = rows.get(id); if (row) { row.element.classList.add('error'); row.detail.textContent = message; row.actions.replaceChildren(); row.progress.remove(); row.done = true; } }
     });
   };
   if (channel.readyState === 'open') open(); else channel.addEventListener('open', open, { once: true });
-  channel.addEventListener('close', () => { if (!stopped && activeChannel === channel) failConnection(channel.error || 'Соединение с другим устройством закрыто. Создайте новое подключение.'); });
+  for (const type of ['close', 'error']) channel.addEventListener(type, () => {
+    if (stopped || activeChannel !== channel) return;
+    if (session.mode === 'auto' && transport === 'direct') void recoverDirect();
+    else failConnection(channel.error || 'Соединение с другим устройством закрыто. Создайте новое подключение.');
+  });
 }
 function rowFor(spec, direction) {
   if (direction === 'incoming') $('empty').hidden = true;
@@ -298,6 +329,7 @@ function memorySink(spec, row) {
   return { write: async data => { parts.push(data); }, close: async () => { const blob = new Blob(parts, { type: 'application/octet-stream' }); parts = []; return blob; }, abort: async () => { parts = []; row.releaseMemory(); } };
 }
 async function showIncoming(spec) {
+  const receivingLink = link;
   const row = rowFor(spec, 'incoming');
   window.NearbyWorkspace.incoming();
   try {
@@ -308,9 +340,9 @@ async function showIncoming(spec) {
       const writable = await handle.createWritable();
       sink = { write: data => writable.write(data), close: async () => { await writable.close(); return null; }, abort: async () => { await writable.abort(); await receiveDirectory.removeEntry(destination); } };
     } else sink = memorySink(spec, row);
-    await link.accept(spec.id, sink);
+    await receivingLink.accept(spec.id, sink);
     if (!row.done) cancelButton(spec.id, row.actions);
-  } catch (error) { link.cancel(spec.id, error.message || 'Не удалось сохранить файл.'); }
+  } catch (error) { receivingLink.cancel(spec.id, error.message || 'Не удалось сохранить файл.'); }
 }
 
 for (const button of document.querySelectorAll('[data-choose-folder]')) {
@@ -359,22 +391,23 @@ function complete(id, direction, blob) {
 }
 async function sendFiles(files) {
   if (!connectionReady || !link?.peerLimit || sending || stopped) return;
+  const sendingLink = link;
   sending = true; $('files').disabled = true; $('drop').classList.add('disabled');
   try {
     for (const file of files) {
-      if (stopped) break;
+      if (stopped || link !== sendingLink || !connectionReady) break;
       const id = crypto.randomUUID();
       try {
         validateFileSpec({ id, name: file.name, size: file.size }, link.peerLimit);
         const row = rowFor({ id, name: file.name, size: file.size }, 'outgoing'); cancelButton(id, row.actions);
-        await link.sendFile(file, id);
+        await sendingLink.sendFile(file, id);
       } catch (error) { if (!rows.has(id)) notice(`${file.name}: ${error.message}`, true); }
     }
-  } finally { sending = false; $('files').value = ''; if (!stopped && link?.peerLimit) { $('files').disabled = false; $('drop').classList.remove('disabled'); } }
+  } finally { sending = false; $('files').value = ''; if (!stopped && connectionReady && link?.peerLimit) { $('files').disabled = false; $('drop').classList.remove('disabled'); } }
 }
 function failConnection(message) { notice(message, true); status('Соединение завершено', 'Нажмите «Новое подключение», чтобы попробовать снова.'); stopLocal(); }
 function stopLocal() {
-  stopped = true; connectionReady = false; clearTimeout(pollTimer); clearTimeout(connectionTimer);
+  stopped = true; connectionReady = false; clearTimeout(pollTimer); clearTimeout(connectionTimer); clearTimeout(disconnectTimer);
   hideInvitationId();
   link?.close(); probeChannel?.close(); peer?.close(); relayChannel?.close(); if (session) session.relaySecret = null;
   $('files').disabled = true; $('drop').classList.add('disabled');

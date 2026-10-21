@@ -35,8 +35,14 @@ function selectRelay(array &$state, string $base, string $room, int $now, $roomH
 }
 
 function automaticTransport(array &$state, string $base, string $room, string $role, int $now, $roomHandle, string $event = 'status'): void {
-    if (($state['mode'] ?? '') !== 'auto' || !$state['approved'] || ($state['transport'] ?? '') !== 'probing') return;
-    if ($event === 'fallback' || $now >= $state['probeDeadline']) { selectRelay($state, $base, $room, $now, $roomHandle); return; }
+    if (($state['mode'] ?? '') !== 'auto' || !$state['approved']) return;
+    // A failed established direct channel may move to relay once. Late probe
+    // votes cannot undo the choice or reinitialize an existing encrypted queue.
+    if (($state['transport'] ?? '') === 'direct' && $event === 'direct-failed') { selectRelay($state, $base, $room, $now, $roomHandle); return; }
+    if (($state['transport'] ?? '') !== 'probing') return;
+    if (in_array($event, ['fallback', 'direct-failed'], true) || $now >= $state['probeDeadline']) { selectRelay($state, $base, $room, $now, $roomHandle); return; }
     if ($event === 'direct-ready') $state['directReady'][$role] = true;
-    if (($state['directReady']['host'] ?? false) && ($state['directReady']['guest'] ?? false)) $state['transport'] = 'direct';
+    if (($state['directReady']['host'] ?? false) && ($state['directReady']['guest'] ?? false)) {
+        $state['transport'] = 'direct'; $state['expires'] = $now + 7200;
+    }
 }

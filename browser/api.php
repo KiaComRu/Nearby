@@ -200,7 +200,7 @@ try {
     } elseif ($action === 'transport') {
         if (($state['mode'] ?? '') !== 'auto' || !$state['approved']) fail(403, 'Сначала подтвердите устройство.');
         $event = $input['event'] ?? 'status';
-        if (!is_string($event) || !in_array($event, ['status', 'direct-ready', 'fallback'], true)) fail(400, 'Некорректный способ подключения.');
+        if (!is_string($event) || !in_array($event, ['status', 'direct-ready', 'fallback', 'direct-failed'], true)) fail(400, 'Некорректный способ подключения.');
         automaticTransport($state, $base, $room, $role, $now, $f, $event);
     } elseif ($action === 'close') {
         $state['closed'] = true; $state['messages'] = [];

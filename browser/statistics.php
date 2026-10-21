@@ -48,6 +48,11 @@ function transferStatistics(string $base, ?array $report = null): array {
             $room = $report['room']; $id = $report['id']; $size = $usage ? 0 : $report['size'];
             $bucket = $usage ? 'usages' : 'transfers';
             $entry = $data['rooms'][$room] ?? ['expires' => $report['expires'], 'transfers' => []];
+            // Recovery keeps the same pairing; preserve its deduplication ledger
+            // for the extended lifetime instead of counting it again later.
+            if ($entry['expires'] < $report['expires']) {
+                $entry['expires'] = $report['expires']; $data['rooms'][$room] = $entry; $changed = true;
+            }
             $entry[$bucket] ??= [];
             if (array_key_exists($id, $entry[$bucket])) {
                 if ($entry[$bucket][$id] !== $size) fail(409, 'Размер уже учтённой передачи отличается.');

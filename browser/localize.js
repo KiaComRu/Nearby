@@ -3,6 +3,10 @@
   const languages = ['en', 'hi', 'zh-CN', 'es'];
   const supported = ['ru', ...languages];
   const rows = [
+    ['Восстанавливаем соединение', 'Reconnecting', 'फिर से कनेक्ट हो रहा है', '正在恢复连接', 'Reconectando'],
+    ['Прямой канал недоступен. Переключаемся на зашифрованный интернет-канал.', 'Direct connection is unavailable. Switching to an encrypted internet channel.', 'सीधा कनेक्शन उपलब्ध नहीं है। एन्क्रिप्टेड इंटरनेट चैनल पर जा रहे हैं।', '直连不可用，正在切换到加密互联网通道。', 'La conexión directa no está disponible. Cambiando a un canal de internet cifrado.'],
+    ['Проверяем соединение с другим устройством…', 'Checking the connection to the other device…', 'दूसरे डिवाइस से कनेक्शन जाँचा जा रहा है…', '正在检查与另一台设备的连接…', 'Comprobando la conexión con el otro dispositivo…'],
+    ['Прямое соединение прервано. Отправьте незавершённый файл заново после восстановления связи.', 'Direct connection interrupted. Send the unfinished file again after reconnection.', 'सीधा कनेक्शन टूट गया। कनेक्शन लौटने पर अधूरी फ़ाइल दोबारा भेजें।', '直连已中断，连接恢复后请重新发送未完成的文件。', 'La conexión directa se ha interrumpido. Vuelve a enviar el archivo incompleto tras reconectar.'],
     ['Дополнительные настройки', 'Advanced settings', 'अतिरिक्त सेटिंग', '高级设置', 'Ajustes avanzados'],
     ['Способ подключения', 'Connection method', 'कनेक्शन का तरीका', '连接方式', 'Método de conexión'],
     ['Автоматически — рекомендуем', 'Automatic — recommended', 'अपने आप — अनुशंसित', '自动选择（推荐）', 'Automático — recomendado'],

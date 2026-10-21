@@ -37,6 +37,23 @@ test('automatic transport agrees once, requires approval, handles expiry and sha
     assert.equal((await vote(direct.host, 'fallback')).transport, 'direct');
     assert.ok(!(await state(direct)).relay);
     await request({ ...direct.guest, action: 'relay-pull', after: 0 }, 403);
+    assert.ok((await state(direct)).expires > Math.floor(Date.now() / 1000) + 7000);
+    await request({ ...direct.host, action: 'record-usage' });
+    const ledgerPath = path.join(directory, 'statistics.json');
+    const oldLedger = JSON.parse(await readFile(ledgerPath, 'utf8'));
+    oldLedger.rooms[direct.host.room].expires = Math.floor(Date.now() / 1000) + 30;
+    await writeFile(ledgerPath, JSON.stringify(oldLedger));
+    assert.equal((await vote(direct.guest, 'direct-failed')).transport, 'relay');
+    assert.equal((await request({ ...direct.host, action: 'poll' })).transport, 'relay', 'the healthy endpoint discovers recovery through polling');
+    await request({ ...direct.guest, action: 'record-usage' });
+    const extendedLedger = JSON.parse(await readFile(ledgerPath, 'utf8'));
+    assert.equal(extendedLedger.rooms[direct.host.room].expires, (await state(direct)).expires, 'recovery extends deduplication even for an already counted pairing');
+    const recoveredFrame = { seq: 1, data: Buffer.alloc(17, 2).toString('base64') };
+    await request({ ...direct.guest, action: 'relay-push', frames: [recoveredFrame] });
+    assert.equal((await vote(direct.host, 'direct-failed')).transport, 'relay');
+    assert.equal((await state(direct)).relay.guest.seq, 1, 'repeated failure events cannot reset relay sequences or ciphertext');
+    assert.equal((await vote(direct.host, 'direct-ready')).transport, 'relay');
+    await request({ ...direct.host, action: 'close' });
     const fallback = await room(); await request({ ...fallback.host, action: 'approve' });
     const choices = await Promise.all([vote(fallback.host, 'fallback'), vote(fallback.guest, 'direct-ready')]);
     assert.ok(choices.every(result => result.transport === 'relay'));
@@ -65,6 +82,6 @@ test('automatic transport agrees once, requires approval, handles expiry and sha
     await request({ action: 'create', mode: 'internet' }, 503);
     await Promise.all(reservations.map(file => rm(file)));
     assert.equal((await vote(limited.host, 'fallback')).transport, 'relay');
-    assert.equal((await request({ action: 'stats' })).uses, 0, 'probing and transport votes never count as usage');
+    assert.equal((await request({ action: 'stats' })).uses, 1, 'recovery retains the original pairing and never counts a second use');
   } finally { proc.kill(); await new Promise(resolve => proc.once('exit', resolve)); await rm(directory, { recursive: true, force: true }); }
 });
