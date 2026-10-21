@@ -4,6 +4,7 @@ umask(0077);
 ini_set('display_errors', '0');
 require_once __DIR__ . '/statistics.php';
 require_once __DIR__ . '/relay.php';
+require_once __DIR__ . '/automatic.php';
 // LAN signaling or bounded, opaque encrypted frames in the explicit internet mode.
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
@@ -86,7 +87,7 @@ try {
 
     if ($action === 'create') {
         $mode = $input['mode'] ?? 'lan';
-        if (!in_array($mode, ['lan', 'internet'], true)) fail(400, 'Некорректный режим соединения.');
+        if (!in_array($mode, ['lan', 'internet', 'auto'], true)) fail(400, 'Некорректный режим соединения.');
         $idLookup = $input['idLookup'] ?? null;
         $idInviteDigest = $input['idInviteDigest'] ?? null;
         if ($idLookup !== null || $idInviteDigest !== null) {
@@ -103,10 +104,10 @@ try {
                 $old = json_decode(stream_get_contents($f), true);
                 if (!$old || ($old['expires'] ?? 0) < $now || ($old['closed'] ?? false)) unlink($path); else {
                     if ($idLookup !== null && ($old['idLookup'] ?? null) === $idLookup) fail(409, 'Этот ID уже используется. Создайте новое подключение.');
-                    $active++; if (($old['mode'] ?? 'lan') === 'internet') $internetActive++;
+                    $active++; if (usesRelay($old)) $internetActive++;
                 }
                 flock($f, LOCK_UN);
-            } else $active++;
+            } else { $active++; $internetActive++; }
             fclose($f);
         }
         foreach (glob($base . '/budget-*.json') ?: [] as $path) {
@@ -119,6 +120,7 @@ try {
             'hostName' => nameValue($input['name'] ?? ''), 'guestName' => null, 'approved' => false,
             'expires' => $now + ($mode === 'internet' ? 7200 : 900), 'created' => $now, 'seq' => 0, 'messages' => [], 'closed' => false, 'mode' => $mode];
         if ($idLookup !== null) { $state['idLookup'] = $idLookup; $state['inviteExpires'] = $now + 900; }
+        if ($mode === 'auto') $state['transport'] = 'probing';
         if ($mode === 'internet') {
             $empty = ['seq' => 0, 'ack' => 0, 'frames' => [], 'recent' => []];
             $state['relay'] = ['host' => $empty, 'guest' => $empty]; $state['relayLast'] = ['host' => $now, 'guest' => $now];
@@ -192,8 +194,14 @@ try {
     }
     if ($action === 'approve') {
         if ($role !== 'host' || !$state['guest']) fail(403, 'Подтверждение недоступно.');
+        if (!$state['approved'] && ($state['mode'] ?? '') === 'auto') $state['probeDeadline'] = $now + 12;
         $state['approved'] = true;
         if (($state['mode'] ?? 'lan') === 'internet') $state['relayLast'] = ['host' => $now, 'guest' => $now];
+    } elseif ($action === 'transport') {
+        if (($state['mode'] ?? '') !== 'auto' || !$state['approved']) fail(403, 'Сначала подтвердите устройство.');
+        $event = $input['event'] ?? 'status';
+        if (!is_string($event) || !in_array($event, ['status', 'direct-ready', 'fallback'], true)) fail(400, 'Некорректный способ подключения.');
+        automaticTransport($state, $base, $room, $role, $now, $f, $event);
     } elseif ($action === 'close') {
         $state['closed'] = true; $state['messages'] = [];
         unset($state['relay']);
@@ -208,14 +216,15 @@ try {
             if (!is_array($message['candidate'] ?? null) || strlen(json_encode($message)) > 4096) fail(400, 'Некорректный адрес соединения.');
         }
         if (count($state['messages']) >= 128) fail(429, 'Слишком много сообщений соединения.');
-        $state['messages'][] = ['id' => ++$state['seq'], 'from' => $role, 'body' => $message];
+        if (($state['transport'] ?? '') !== 'relay') $state['messages'][] = ['id' => ++$state['seq'], 'from' => $role, 'body' => $message];
     } elseif ($action !== 'poll') fail(400, 'Неизвестная операция.');
+    if ($action === 'poll') automaticTransport($state, $base, $room, $role, $now, $f);
     $after = $input['after'] ?? 0;
     if (!is_int($after) || $after < 0) fail(400, 'Некорректный курсор.');
     $messages = array_values(array_filter($state['messages'], fn($m) => $m['from'] !== $role && $m['id'] > $after));
     // Absolute lifetime; internet mode has a bounded, temporary ciphertext queue.
     writeState($f, $state); flock($f, LOCK_UN); fclose($f);
-    reply(200, ['approved' => $state['approved'], 'guestName' => $state['guestName'], 'hostName' => $state['hostName'], 'messages' => $messages, 'cursor' => $state['seq'], 'expires' => $state['expires']]);
+    reply(200, ['approved' => $state['approved'], 'guestName' => $state['guestName'], 'hostName' => $state['hostName'], 'messages' => $messages, 'cursor' => $state['seq'], 'expires' => $state['expires'], 'transport' => $state['transport'] ?? null]);
 } catch (Throwable $e) {
     error_log('Nearby signaling: ' . get_class($e));
     fail(500, 'Не удалось обработать запрос. Попробуйте позже.');

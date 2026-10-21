@@ -1,5 +1,6 @@
 import { FileLink, MEMORY_LIMIT, DISK_LIMIT, validateFileSpec } from './transfer.mjs';
 import { HttpsRelayChannel, newRelaySecret } from './relay.mjs';
+import { ProbeChannel } from './probe-channel.mjs';
 import { newInvitationId, normalizeInvitationId, formatInvitationId, invitationCredentials } from './invitation-id.mjs';
 const $ = id => document.getElementById(id);
 // Some mobile browsers expose the picker but cannot write to its selected handle.
@@ -12,6 +13,7 @@ let invitation = null, joinInvite = null, signalChain = Promise.resolve();
 let invitationId = null, idExpiryTimer;
 let bufferedBytes = 0;
 let relayChannel = null;
+let transport = null, probeChannel = null, activeChannel = null, connectionReady = false;
 let peerDisplayName = '';
 const sizes = n => n < 1024 ? `${n} Б` : n < 1024 ** 2 ? `${(n / 1024).toFixed(1)} КиБ` : n < 1024 ** 3 ? `${(n / 1024 ** 2).toFixed(1)} МиБ` : `${(n / 1024 ** 3).toFixed(1)} ГиБ`;
 function notice(text, error = false) { $('notice').textContent = text; $('notice').classList.toggle('error', error); $('notice').hidden = !text; }
@@ -69,7 +71,7 @@ function parseInvite(value) {
   const room = params.get('room'), token = params.get('key');
   if (!/^[a-f0-9]{32}$/.test(room || '') || !/^[a-f0-9]{64}$/.test(token || '')) throw new Error('Ссылка-приглашение неполная. Скопируйте её целиком.');
   const mode = params.get('mode') || 'lan', relaySecret = params.get('secret');
-  if (!['lan', 'internet'].includes(mode) || (mode === 'internet' && !/^[a-f0-9]{64}$/.test(relaySecret || ''))) throw new Error('Нужна полная ссылка с ключом интернет-передачи. Скопируйте приглашение заново.');
+  if (!['lan', 'internet', 'auto'].includes(mode) || (mode !== 'lan' && !/^[a-f0-9]{64}$/.test(relaySecret || ''))) throw new Error('Нужна полная ссылка с ключом интернет-передачи. Скопируйте приглашение заново.');
   return { room, token, mode, relaySecret };
 }
 function showSession() {
@@ -104,8 +106,9 @@ async function create() {
     const code = newInvitationId(), credentials = await invitationCredentials(code);
     const result = await api('create', { name: deviceName(), mode, idLookup: credentials.lookup, idInviteDigest: credentials.inviteDigest }, true);
     const idEnabled = result.idEnabled === true;
-    session = { room: result.room, token: result.token, role: 'host', mode, relaySecret: mode === 'internet' ? (idEnabled ? credentials.relaySecret : newRelaySecret()) : null };
-    const url = new URL(location.pathname, location.origin); url.hash = new URLSearchParams({ room: result.room, key: idEnabled ? credentials.token : result.invite, ...(mode === 'internet' ? { mode, secret: session.relaySecret } : {}) }).toString();
+    if (result.mode !== mode) throw new Error('Обновите страницу на обоих устройствах и создайте новое приглашение.');
+    session = { room: result.room, token: result.token, role: 'host', mode, relaySecret: mode !== 'lan' ? (idEnabled ? credentials.relaySecret : newRelaySecret()) : null };
+    const url = new URL(location.pathname, location.origin); url.hash = new URLSearchParams({ room: result.room, key: idEnabled ? credentials.token : result.invite, ...(mode !== 'lan' ? { mode, secret: session.relaySecret } : {}) }).toString();
     invitation = url.href; $('share-link').value = invitation;
     showSession();
     if (idEnabled) showInvitationId(code, result.inviteExpires);
@@ -121,7 +124,7 @@ async function join(value) {
     if (/^[\da-z\s-]+$/i.test(value.trim())) {
       const credentials = await invitationCredentials(normalizeInvitationId(value));
       const resolved = await api('resolve-id', { lookup: credentials.lookup }, true);
-      invite = { room: resolved.room, token: credentials.token, mode: resolved.mode, relaySecret: resolved.mode === 'internet' ? credentials.relaySecret : null };
+      invite = { room: resolved.room, token: credentials.token, mode: resolved.mode, relaySecret: resolved.mode !== 'lan' ? credentials.relaySecret : null };
     } else invite = parseInvite(value);
     // The encryption secret stays in memory; it must never be posted to PHP.
     const result = await api('join', { room: invite.room, token: invite.token, name: deviceName() }, true);
@@ -140,78 +143,129 @@ function sendSignal(message) {
   signalChain.catch(error => { if (!stopped) failConnection(error.message); });
   return signalChain;
 }
-async function startPeer() {
-  started = true;
-  if (session.mode === 'internet') {
-    status('Устанавливаем интернет-связь', 'Проверяем зашифрованное соединение с другим устройством.');
-    relayChannel = new HttpsRelayChannel({ room: session.room, secret: session.relaySecret, role: session.role, request: (action, body) => api(action, body) });
-    bindChannel(relayChannel);
-    connectionTimer = setTimeout(() => { if (!link?.peerLimit) failConnection('Интернет-связь не установлена. Проверьте доступ к сайту и передайте приглашение целиком.'); }, 45000);
-    await relayChannel.start(); return;
-  }
-  if (!window.RTCPeerConnection) throw new Error('Локальный WebRTC недоступен в этом браузере. Выберите режим «Через интернет».');
-  status('Устанавливаем связь', 'Разрешите доступ к локальной сети, если браузер попросит.');
-  // Direct LAN mode. No third-party STUN/TURN service or relay credentials.
-  peer = new RTCPeerConnection({ iceServers: [] });
-  peer.onicecandidate = event => { if (event.candidate) sendSignal({ type: 'candidate', candidate: event.candidate.toJSON() }); };
-  peer.ondatachannel = event => bindChannel(event.channel);
-  peer.onconnectionstatechange = () => {
-    if (peer?.connectionState === 'failed') failConnection('Прямое соединение не удалось. Проверьте общую локальную сеть, отключите VPN или используйте Windows-приложение.');
-    if (peer?.connectionState === 'disconnected') { $('files').disabled = true; status('Связь прервалась', 'Передача может быть прервана. Если связь не восстановится, создайте новое подключение.'); }
-    if (peer?.connectionState === 'connected' && link?.peerLimit) ready(link.peerLimit);
-  };
-  connectionTimer = setTimeout(() => { if (!link?.peerLimit) failConnection('Устройства не смогли соединиться напрямую. Подключите их к одной обычной сети Wi-Fi; гостевая сеть может изолировать устройства.'); }, 45000);
-  if (session.role === 'host') {
-    bindChannel(peer.createDataChannel('nearby-files', { ordered: true }));
-    const offer = await peer.createOffer(); await peer.setLocalDescription(offer);
-    await sendSignal({ type: 'offer', sdp: offer.sdp });
+async function startRelay() {
+  if (stopped || relayChannel) return;
+  transport = 'relay'; clearTimeout(connectionTimer);
+  // Detach callbacks before closing the unsuccessful probe.
+  const oldPeer = peer; peer = null; probeChannel?.close(); probeChannel = null; oldPeer?.close(); incomingCandidates = [];
+  status('Устанавливаем интернет-связь', 'Проверяем зашифрованное соединение с другим устройством.');
+  relayChannel = new HttpsRelayChannel({ room: session.room, secret: session.relaySecret, role: session.role, request: (action, body) => api(action, body) });
+  bindChannel(relayChannel);
+  connectionTimer = setTimeout(() => { if (!connectionReady) failConnection('Интернет-связь не установлена. Проверьте доступ к сайту и передайте приглашение целиком.'); }, 45000);
+  await relayChannel.start();
+}
+async function applyTransport(choice) {
+  if (stopped || session.mode !== 'auto' || transport !== 'probing') return;
+  if (choice === 'relay') await startRelay();
+  else if (choice === 'direct') {
+    transport = 'direct'; clearTimeout(connectionTimer);
+    if (probeChannel?.readyState !== 'open') { failConnection('Прямое соединение прервано. Создайте новое подключение.'); return; }
+    bindChannel(probeChannel); probeChannel.activate();
+    connectionTimer = setTimeout(() => { if (!connectionReady) failConnection('Устройство не ответило вовремя.'); }, 45000);
   }
 }
+async function transportEvent(event) {
+  if (stopped || transport !== 'probing') return;
+  try { const result = await api('transport', { event }); await applyTransport(result.transport); }
+  catch (error) { if (!stopped) { if ([400, 403, 404, 410].includes(error.status)) failConnection(error.message); else notice('Проверяем соединение с сайтом…'); } }
+}
+function directChannel(channel) {
+  if (stopped || transport === 'relay') { channel.close(); return; }
+  if (session.mode !== 'auto') { bindChannel(channel); return; }
+  probeChannel = new ProbeChannel(channel);
+  probeChannel.addEventListener('open', () => { void transportEvent('direct-ready'); }, { once: true });
+  for (const type of ['close', 'error']) probeChannel.addEventListener(type, () => { if (!stopped && transport === 'probing') void transportEvent('fallback'); });
+  if (channel.readyState === 'open') void transportEvent('direct-ready');
+}
+async function startPeer() {
+  started = true;
+  if (session.mode === 'internet') { await startRelay(); return; }
+  transport = session.mode === 'auto' ? 'probing' : 'direct';
+  if (session.mode === 'auto') connectionTimer = setTimeout(() => { void transportEvent('fallback'); }, 12500);
+  try {
+    if (!window.RTCPeerConnection) throw new Error('Локальный WebRTC недоступен в этом браузере. Выберите режим «Через интернет».');
+    status('Устанавливаем связь', session.mode === 'auto' ? 'Nearby автоматически выбирает прямое или интернет-соединение.' : 'Разрешите доступ к локальной сети, если браузер попросит.');
+    // Try host candidates; actual reachability determines the automatic choice.
+    const rtc = new RTCPeerConnection({ iceServers: [] }); peer = rtc;
+    rtc.onicecandidate = event => { if (!stopped && peer === rtc && event.candidate) sendSignal({ type: 'candidate', candidate: event.candidate.toJSON() }); };
+    rtc.ondatachannel = event => { if (peer === rtc) directChannel(event.channel); else event.channel.close(); };
+    rtc.onconnectionstatechange = () => {
+      if (stopped || peer !== rtc) return;
+      if (rtc.connectionState === 'failed') {
+        if (transport === 'probing') void transportEvent('fallback');
+        else failConnection('Прямое соединение не удалось. Создайте новое подключение.');
+      }
+      if (rtc.connectionState === 'disconnected' && connectionReady) { $('files').disabled = true; status('Связь прервалась', 'Передача может быть прервана. Если связь не восстановится, создайте новое подключение.'); }
+      if (rtc.connectionState === 'connected' && connectionReady) ready(link.peerLimit);
+    };
+    if (session.mode !== 'auto') connectionTimer = setTimeout(() => { if (!connectionReady) failConnection('Устройства не смогли соединиться напрямую. Подключите их к одной обычной сети Wi-Fi; гостевая сеть может изолировать устройства.'); }, 45000);
+    if (session.role === 'host') {
+      directChannel(rtc.createDataChannel('nearby-files', { ordered: true }));
+      const offer = await rtc.createOffer();
+      if (stopped || peer !== rtc) return;
+      await rtc.setLocalDescription(offer);
+      if (!stopped && peer === rtc) await sendSignal({ type: 'offer', sdp: offer.sdp });
+    }
+  } catch (error) { if (!stopped && transport === 'probing') await transportEvent('fallback'); else if (!stopped && transport !== 'relay') throw error; }
+}
 async function receiveSignal(message) {
-  if (message.type === 'candidate') {
-    if (!peer.remoteDescription) incomingCandidates.push(message.candidate); else await peer.addIceCandidate(message.candidate);
-    return;
-  }
-  if ((message.type === 'offer' && session.role !== 'guest') || (message.type === 'answer' && session.role !== 'host')) throw new Error('Неожиданное описание соединения.');
-  await peer.setRemoteDescription({ type: message.type, sdp: message.sdp });
-  for (const candidate of incomingCandidates) await peer.addIceCandidate(candidate);
-  incomingCandidates = [];
-  if (message.type === 'offer') {
-    const answer = await peer.createAnswer(); await peer.setLocalDescription(answer);
-    await sendSignal({ type: 'answer', sdp: answer.sdp });
-  }
+  const rtc = peer;
+  if (stopped || !rtc || transport === 'relay') return;
+  try {
+    if (message.type === 'candidate') {
+      if (!rtc.remoteDescription) incomingCandidates.push(message.candidate); else await rtc.addIceCandidate(message.candidate);
+      return;
+    }
+    if ((message.type === 'offer' && session.role !== 'guest') || (message.type === 'answer' && session.role !== 'host')) throw new Error('Неожиданное описание соединения.');
+    await rtc.setRemoteDescription({ type: message.type, sdp: message.sdp });
+    for (const candidate of incomingCandidates) { if (stopped || peer !== rtc) return; await rtc.addIceCandidate(candidate); }
+    incomingCandidates = [];
+    if (message.type === 'offer') {
+      const answer = await rtc.createAnswer();
+      if (stopped || peer !== rtc) return;
+      await rtc.setLocalDescription(answer);
+      if (!stopped && peer === rtc) await sendSignal({ type: 'answer', sdp: answer.sdp });
+    }
+  } catch (error) { if (!stopped && transport === 'probing') await transportEvent('fallback'); else if (!stopped && peer === rtc) throw error; }
 }
 let pollFailures = 0;
 async function poll() {
-  if (stopped || !session || link?.peerLimit) return;
+  if (stopped || !session || connectionReady) return;
   try {
-    const result = await api('poll', { after: cursor }); pollFailures = 0;
+    const result = await api('poll', { after: cursor });
+    if (stopped) return;
+    pollFailures = 0;
     if (session.role === 'host' && result.guestName && !result.approved) {
       $('peer-name').textContent = result.guestName; $('peer-request').hidden = false; $('invitation').hidden = true; hideInvitationId();
       peerDisplayName = result.guestName;
       status('Разрешить подключение?', 'Убедитесь, что приглашение открыл ваш получатель.');
     }
     if (result.approved && !started) { $('peer-request').hidden = true; $('invitation').hidden = true; hideInvitationId(); await startPeer(); }
-    if (started && session.mode !== 'internet') for (const message of result.messages) await receiveSignal(message.body);
+    if (started) await applyTransport(result.transport);
+    if (started && transport !== 'relay') for (const message of result.messages) await receiveSignal(message.body);
     cursor = result.cursor;
   } catch (error) {
     if ([400, 403, 404, 410].includes(error.status) || ++pollFailures >= 4) { failConnection(error.message); return; }
     notice('Проверяем соединение с сайтом…');
   }
-  if (!stopped && !link?.peerLimit) pollTimer = setTimeout(poll, 1500);
+  if (!stopped && !connectionReady) pollTimer = setTimeout(poll, 1500);
 }
 function ready(limit) {
+  if (stopped) return;
+  connectionReady = true;
   void reportUsage();
   clearTimeout(connectionTimer); clearTimeout(pollTimer); notice('');
   status('Устройства соединены', `Подключено: ${peerDisplayName || 'Второе устройство'}. Файлы принимаются автоматически.`, true);
   window.NearbyWorkspace.setConnected(true);
-  $('transport-label').textContent = session.mode === 'internet' ? 'Интернет · сквозное шифрование' : 'WebRTC · напрямую';
+  $('transport-label').textContent = transport === 'relay' ? 'Интернет · сквозное шифрование' : 'WebRTC · напрямую';
   $('files').disabled = sending; $('drop').classList.toggle('disabled', sending);
   $('file-limit').textContent = `До ${sizes(limit)} на файл для этого получателя`;
 }
 function bindChannel(channel) {
+  activeChannel = channel;
   const open = () => {
-    link = new FileLink(channel, { maxReceive: session.mode === 'internet' || !receiveDirectory ? MEMORY_LIMIT : DISK_LIMIT,
+    if (stopped || activeChannel !== channel) return;
+    link = new FileLink(channel, { maxReceive: transport === 'relay' || !receiveDirectory ? MEMORY_LIMIT : DISK_LIMIT,
       onReady: ready,
       onOffer: showIncoming,
       onProgress: (id, bytes, direction) => { const row = rows.get(id); if (row) { row.progress.value = bytes; row.detail.textContent = `${direction === 'sending' ? 'Отправляем' : 'Принимаем'}: ${sizes(bytes)} / ${sizes(row.size)}`; } },
@@ -220,7 +274,7 @@ function bindChannel(channel) {
     });
   };
   if (channel.readyState === 'open') open(); else channel.addEventListener('open', open, { once: true });
-  channel.addEventListener('close', () => { if (!stopped) failConnection(channel.error || 'Соединение с другим устройством закрыто. Создайте новое подключение.'); });
+  channel.addEventListener('close', () => { if (!stopped && activeChannel === channel) failConnection(channel.error || 'Соединение с другим устройством закрыто. Создайте новое подключение.'); });
 }
 function rowFor(spec, direction) {
   if (direction === 'incoming') $('empty').hidden = true;
@@ -267,7 +321,7 @@ for (const button of document.querySelectorAll('[data-choose-folder]')) {
       receiveDirectory = await window.showDirectoryPicker({ mode: 'readwrite' });
       for (const name of document.querySelectorAll('.receive-folder-name')) name.textContent = receiveDirectory.name ? `Папка: ${receiveDirectory.name}` : 'Папка выбрана.';
       $('save-hint').textContent = 'Файлы сохраняются автоматически в выбранную папку.';
-      if (link?.peerLimit && session?.mode !== 'internet') notice('Папка выбрана. Для файлов больше 100 МиБ создайте новое подключение.');
+      if (link?.peerLimit && transport !== 'relay') notice('Папка выбрана. Для файлов больше 100 МиБ создайте новое подключение.');
     } catch (error) { if (error.name !== 'AbortError') notice('Выбор папки недоступен. Файлы будут загружаться через браузер.'); }
   });
 }
@@ -304,7 +358,7 @@ function complete(id, direction, blob) {
   }
 }
 async function sendFiles(files) {
-  if (!link?.peerLimit || sending || stopped) return;
+  if (!connectionReady || !link?.peerLimit || sending || stopped) return;
   sending = true; $('files').disabled = true; $('drop').classList.add('disabled');
   try {
     for (const file of files) {
@@ -320,9 +374,9 @@ async function sendFiles(files) {
 }
 function failConnection(message) { notice(message, true); status('Соединение завершено', 'Нажмите «Новое подключение», чтобы попробовать снова.'); stopLocal(); }
 function stopLocal() {
-  stopped = true; clearTimeout(pollTimer); clearTimeout(connectionTimer);
+  stopped = true; connectionReady = false; clearTimeout(pollTimer); clearTimeout(connectionTimer);
   hideInvitationId();
-  link?.close(); peer?.close(); relayChannel?.close(); if (session) session.relaySecret = null;
+  link?.close(); probeChannel?.close(); peer?.close(); relayChannel?.close(); if (session) session.relaySecret = null;
   $('files').disabled = true; $('drop').classList.add('disabled');
   window.NearbyWorkspace.setConnected(false);
   $('peer-request').hidden = true; $('invitation').hidden = true; $('transport-label').textContent = 'Не подключено';
@@ -356,12 +410,13 @@ window.addEventListener('hashchange', () => {
 $('save-hint').textContent = diskSupported ? 'Приём автоматический. Можно один раз выбрать папку получения.' : 'Приём автоматический · до 100 МиБ. Сохраните файлы перед закрытием.';
 function describeMode() {
   const internet = $('connection-mode').value === 'internet';
-  $('mode-help').textContent = internet ? 'Для разных Wi-Fi и мобильного интернета. До 100 МиБ на файл; оба устройства остаются онлайн. Зашифрованные части временно проходят через сервер.' : 'Для устройств в одной доступной локальной сети. Файлы идут напрямую через WebRTC.';
-  $('web-discovery-hint').hidden = internet;
+  const automatic = $('connection-mode').value === 'auto';
+  $('mode-help').textContent = automatic ? 'Соединение выбирается автоматически: напрямую, а если недоступно — через зашифрованный интернет-канал (до 100 МиБ на файл).' : internet ? 'Для разных Wi-Fi и мобильного интернета. До 100 МиБ на файл; оба устройства остаются онлайн. Зашифрованные части временно проходят через сервер.' : 'Для устройств в одной доступной локальной сети. Файлы идут напрямую через WebRTC.';
+  $('web-discovery-hint').hidden = internet || automatic;
 }
 $('connection-mode').addEventListener('change', describeMode);
 const initialParams = new URLSearchParams(location.hash.slice(1));
-if (initialParams.get('mode') === 'internet' || !window.RTCPeerConnection) $('connection-mode').value = 'internet';
+if (['lan', 'internet', 'auto'].includes(initialParams.get('mode'))) $('connection-mode').value = initialParams.get('mode');
 describeMode();
 if (!window.isSecureContext || !crypto.subtle) { notice('Откройте Nearby по HTTPS в современном браузере. На Windows рекомендуем Chrome или Edge.', true); $('create').disabled = true; $('join-form').hidden = true; }
 else if (initialParams.has('room')) {

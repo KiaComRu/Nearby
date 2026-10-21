@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/automatic.php';
 
 const RELAY_FRAME_MAX = 262200;
 const RELAY_QUEUE_MAX = 1048576;
@@ -33,7 +34,7 @@ function relayCleanup(string $base, int $now): void {
             if (flock($file, LOCK_EX | LOCK_NB)) {
                 if (fstat($file)['mtime'] > $now - 120) { flock($file, LOCK_UN); fclose($file); continue; }
                 $state = json_decode(stream_get_contents($file), true);
-                if ($state && (($state['mode'] ?? 'lan') === 'internet' || ($state['expires'] ?? 0) < $now)) {
+                if ($state && (usesRelay($state) || ($state['expires'] ?? 0) < $now)) {
                     // Remove ciphertext while the inode remains locked, then unlink.
                     ftruncate($file, 0); fflush($file); @unlink($path);
                 }
@@ -45,7 +46,7 @@ function relayCleanup(string $base, int $now): void {
 }
 
 function relayAction(string $action, array $input, array &$state, string $role, string $base, int $now, int $dailyLimit): array {
-    if (($state['mode'] ?? 'lan') !== 'internet' || !$state['approved']) fail(403, 'Интернет-передача доступна после подтверждения устройства.');
+    if (!usesRelay($state) || !$state['approved']) fail(403, 'Интернет-передача доступна после подтверждения устройства.');
     if ($now - ($state['relayLast'][$role] ?? $now) > 120) fail(410, 'Интернет-подключение прервано. Создайте новое приглашение.');
     $state['relayLast'][$role] = $now;
     $other = $role === 'host' ? 'guest' : 'host';

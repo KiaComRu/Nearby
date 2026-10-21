@@ -22,15 +22,15 @@
   <link rel="apple-touch-icon" href="apple-touch-icon.png" sizes="180x180">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="localize.css?v=tabs-1">
-<script defer="" src="localize.js?v=ead254269db3">
+<script defer="" src="localize.js?v=0bf9d35e4843">
 </script>
   <script defer="" src="vendor/qrcode.js">
 </script>
-<script type="module" src="app-0.5.3.js?v=4b20d2f1584e">
+<script type="module" src="app-0.5.4.js?v=0ad12ca9d24f">
 </script>
 <script defer="" src="statistics.js?v=uses-1">
 </script>
-<link rel="stylesheet" href="workspace.css?v=63f69f302159">
+<link rel="stylesheet" href="workspace.css?v=39cdc47da425">
 </head>
 <body class="compact-app web-app">
   <header class="header">
@@ -77,13 +77,15 @@
 <section id="connection-pane" class="tab-panel" role="tabpanel" aria-labelledby="tab-connection">
 <section id="start" class="panel start-panel">
 <div class="start-settings">
-<div>
-<label class="label" for="connection-mode">Как соединить устройства</label>
+<details id="connection-settings">
+<summary>Дополнительные настройки</summary>
+<label class="label" for="connection-mode">Способ подключения</label>
 <select id="connection-mode">
+<option value="auto" selected="">Автоматически — рекомендуем</option>
 <option value="lan">В одной локальной сети — напрямую</option>
 <option value="internet">Через интернет — любые доступные сети</option>
 </select>
-</div>
+</details>
 <div>
 <label class="label" for="device-name">Имя устройства — можно изменить</label>
 <input id="device-name" maxlength="40" autocomplete="off" placeholder="Название устройства">

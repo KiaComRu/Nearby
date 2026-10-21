@@ -3,6 +3,14 @@
   const languages = ['en', 'hi', 'zh-CN', 'es'];
   const supported = ['ru', ...languages];
   const rows = [
+    ['Дополнительные настройки', 'Advanced settings', 'अतिरिक्त सेटिंग', '高级设置', 'Ajustes avanzados'],
+    ['Способ подключения', 'Connection method', 'कनेक्शन का तरीका', '连接方式', 'Método de conexión'],
+    ['Автоматически — рекомендуем', 'Automatic — recommended', 'अपने आप — अनुशंसित', '自动选择（推荐）', 'Automático — recomendado'],
+    ['Соединение выбирается автоматически: напрямую, а если недоступно — через зашифрованный интернет-канал (до 100 МиБ на файл).', 'Connection is selected automatically: direct when available, otherwise an encrypted internet channel (up to 100 MiB per file).', 'कनेक्शन अपने आप चुना जाता है: सीधे, या उपलब्ध न होने पर एन्क्रिप्टेड इंटरनेट चैनल (प्रति फ़ाइल 100 MiB तक)।', '自动选择连接：优先直连，否则使用加密互联网通道（每个文件上限 100 MiB）。', 'La conexión se elige automáticamente: directa si está disponible, o por un canal de internet cifrado (hasta 100 MiB por archivo).'],
+    ['Nearby автоматически выбирает прямое или интернет-соединение.', 'Nearby automatically selects a direct or internet connection.', 'Nearby अपने आप सीधा या इंटरनेट कनेक्शन चुनता है।', 'Nearby 自动选择直连或互联网连接。', 'Nearby elige automáticamente una conexión directa o por internet.'],
+    ['Обновите страницу на обоих устройствах и создайте новое приглашение.', 'Refresh both devices and create a new invitation.', 'दोनों डिवाइस पर पेज रीफ़्रेश करके नया आमंत्रण बनाएँ।', '请刷新两台设备的页面并创建新邀请。', 'Actualiza ambos dispositivos y crea una invitación nueva.'],
+    ['Прямое соединение прервано. Создайте новое подключение.', 'Direct connection interrupted. Create a new connection.', 'सीधा कनेक्शन टूट गया। नया कनेक्शन बनाएँ।', '直连已中断，请创建新连接。', 'La conexión directa se ha interrumpido. Crea una nueva.'],
+    ['Прямое соединение не удалось. Создайте новое подключение.', 'Direct connection failed. Create a new connection.', 'सीधा कनेक्शन नहीं बना। नया कनेक्शन बनाएँ।', '直连失败，请创建新连接。', 'La conexión directa ha fallado. Crea una nueva.'],
     ['Папка выбрана.', 'Folder selected.', 'फ़ोल्डर चुना गया।', '已选择文件夹。', 'Carpeta elegida.'],
     ['Устройства рядом: поиск ПК доступен в приложении Windows. В браузере подключайтесь по ID, QR-коду или ссылке.', 'Nearby devices: PC discovery is available in the Windows app. In a browser, use an ID, QR code or link.', 'पास के डिवाइस: PC खोज Windows ऐप में उपलब्ध है। ब्राउज़र में ID, QR या लिंक इस्तेमाल करें।', '附近设备：Windows 应用支持查找电脑。浏览器请使用 ID、二维码或链接。', 'Dispositivos cercanos: la búsqueda de PC está en la aplicación Windows. En el navegador utiliza un ID, QR o enlace.'],
     ['Введите ID или вставьте ссылку с другого устройства.', 'Enter an ID or paste the link from the other device.', 'ID डालें या दूसरे डिवाइस का लिंक पेस्ट करें।', '输入 ID 或粘贴另一台设备的链接。', 'Introduce el ID o pega el enlace del otro dispositivo.'],
