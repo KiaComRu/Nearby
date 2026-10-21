@@ -1,65 +1,233 @@
 <!doctype html>
 <html lang="ru">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#080d18"><meta name="referrer" content="no-referrer">
-  <meta name="description" content="Nearby в браузере: передавайте файлы между компьютером и телефоном без установки. Подключение по QR-коду и подтверждение приёма.">
+  <meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#080d18">
+<meta name="referrer" content="no-referrer">
+  <meta name="description" content="Nearby в браузере: подключите устройства по QR или ссылке и передавайте файлы с автоматическим приёмом.">
   <title>Nearby — передача в браузере</title>
   <link rel="manifest" href="manifest.webmanifest">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Nearby">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="stylesheet" href="pwa.css"><script defer src="pwa.js"></script>
+  <link rel="stylesheet" href="pwa.css">
+<script src="tabs.js?v=tabs-1" defer="">
+</script>
+<script defer="" src="pwa.js">
+</script>
   <link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48 64x64">
   <link rel="icon" type="image/svg+xml" href="favicon.svg" sizes="any">
   <link rel="apple-touch-icon" href="apple-touch-icon.png" sizes="180x180">
   <link rel="stylesheet" href="styles.css">
-  <script defer src="vendor/qrcode.js"></script><script type="module" src="app.js?v=uses-1"></script><script defer src="statistics.js?v=uses-1"></script>
+  <link rel="stylesheet" href="localize.css?v=tabs-1">
+<script defer="" src="localize.js?v=ead254269db3">
+</script>
+  <script defer="" src="vendor/qrcode.js">
+</script>
+<script type="module" src="app-0.5.3.js?v=4b20d2f1584e">
+</script>
+<script defer="" src="statistics.js?v=uses-1">
+</script>
+<link rel="stylesheet" href="workspace.css?v=63f69f302159">
 </head>
-<body>
-  <header class="header"><a class="brand" href="/" aria-label="Nearby — главная"><span class="mark">∿</span>nearby<span class="dot">.</span></a><span class="badge">БРАУЗЕРНАЯ ВЕРСИЯ · БЕТА</span><a class="source" href="https://github.com/KiaComRu/Nearby" target="_blank" rel="noopener noreferrer">GitHub ↗</a></header>
-  <main>
-    <section class="intro"><p class="eyebrow">ВАШИ УСТРОЙСТВА. РАССТОЯНИЕ НЕ МЕШАЕТ.</p><h1>Передавайте файлы.<br><em>Между сетями.</em></h1><p class="lead">В одной сети — напрямую. В разных сетях — через интернет. <br>Подключитесь по QR-коду или полной ссылке-приглашению.</p></section>
-    <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
-    <p id="pwa-status" class="pwa-status" role="status" aria-live="polite" hidden></p>
-    <section id="pwa-install-panel" class="pwa-panel" aria-labelledby="pwa-title">
-      <div><h2 id="pwa-title" data-pwa="title">Nearby на главном экране</h2><p data-pwa="description">Добавьте значок на телефон и открывайте Nearby как отдельное приложение.</p></div>
-      <button id="pwa-install" class="button secondary" type="button" hidden data-pwa="install">Установить Nearby</button>
-      <details id="pwa-help"><summary data-pwa="help">Как установить на телефон</summary>
+<body class="compact-app web-app">
+  <header class="header">
+<a class="brand" href="/" aria-label="Nearby — главная">
+<span class="mark">∿</span>nearby<span class="dot">.</span>
+</a>
+<span class="badge">БРАУЗЕРНАЯ ВЕРСИЯ · БЕТА</span>
+<a class="source" href="https://github.com/KiaComRu/Nearby" target="_blank" rel="noopener noreferrer">GitHub ↗</a>
+<details class="pwa-launcher">
+<summary>Установить</summary>
+<section id="pwa-install-panel" class="pwa-panel" aria-labelledby="pwa-title">
+      <div>
+<h2 id="pwa-title" data-pwa="title">Nearby на главном экране</h2>
+<p data-pwa="description">Добавьте значок на телефон и открывайте Nearby как отдельное приложение.</p>
+</div>
+      <button id="pwa-install" class="button secondary" type="button" hidden="" data-pwa="install">Установить Nearby</button>
+      <details id="pwa-help">
+<summary data-pwa="help">Как установить на телефон</summary>
         <p id="pwa-android" data-pwa="android">Android: откройте меню браузера ⋮ → «Установить приложение» или «Добавить на главный экран».</p>
         <p id="pwa-ios" data-pwa="ios">iPhone / iPad: откройте сайт в Safari → «Поделиться» → «На экран “Домой”». Если доступен переключатель «Открывать как веб-приложение», включите его.</p>
         <p data-pwa="limits">Для подключения нужен интернет. Во время передачи держите Nearby открытым и не блокируйте телефон.</p>
       </details>
     </section>
-    <section id="start" class="panel start-panel">
-      <div><span class="step">01 / НАЧНИТЕ ЗДЕСЬ</span><h2>Свяжите два устройства</h2><p class="muted">Подключение и каждый входящий файл подтверждаются получателем.</p></div>
-      <label class="label" for="connection-mode">Как соединить устройства</label><select id="connection-mode"><option value="lan">В одной локальной сети — напрямую</option><option value="internet">Через интернет — любые доступные сети</option></select><p id="mode-help" class="muted"></p>
-      <label class="label" for="device-name">Имя устройства — можно изменить</label><input id="device-name" maxlength="40" autocomplete="off" placeholder="Название устройства">
-      <button id="create" class="button primary">Создать подключение <span>↗</span></button>
-      <div class="divider">УЖЕ ЕСТЬ ПРИГЛАШЕНИЕ?</div>
-      <form id="join-form"><label class="label" for="invite-input">Ссылка с другого устройства</label><div class="input-row"><input id="invite-input" type="text" autocomplete="off" spellcheck="false" placeholder="Вставьте ссылку-приглашение" required><button class="button secondary" type="submit">Подключиться</button></div></form>
-      <button id="join-invite" class="button primary" hidden>Подключиться к устройству <span>↗</span></button>
-    </section>
-    <section id="session" class="session-grid" hidden>
-      <aside class="panel connection-panel">
-        <span class="step">02 / СОЕДИНЕНИЕ</span><div class="connection-state"><span id="status-dot" class="status-dot"></span><h2 id="connection-title">Ожидаем устройство</h2></div><p id="connection-detail" class="muted">Откройте приглашение на втором устройстве.</p>
-        <div id="invitation"><div class="qr-wrap"><canvas id="qr" aria-label="QR-код приглашения"></canvas></div><p class="qr-help">Сканируйте камерой телефона<br>или отправьте ссылку на другое устройство.</p><button id="copy" class="button secondary full">Скопировать приглашение ↗</button><input id="share-link" class="share-link" readonly aria-label="Ссылка-приглашение"><small>Ссылка открывает доступ к подключению. Делитесь ею только с получателем.</small></div>
-        <div id="peer-request" class="peer-request" hidden><p><b id="peer-name"></b> хочет подключиться.</p><button id="approve" class="button primary full">Это моё устройство — разрешить</button><button id="reject" class="button quiet full">Отклонить и закрыть</button></div>
+</details>
+</header>
+  <main>
+    <section class="intro">
+<p class="eyebrow">ВАШИ УСТРОЙСТВА. РАССТОЯНИЕ НЕ МЕШАЕТ.</p>
+<h1>Файлы между устройствами</h1>
+<p class="lead">Подключитесь один раз — передавайте без подтверждения каждого файла.</p>
+</section>
+    <div id="notice" class="notice" role="status" aria-live="polite" hidden="">
+</div>
+    <p id="pwa-status" class="pwa-status" role="status" aria-live="polite" hidden="">
+</p>
+
+
+
+    <nav class="workspace-tabs" role="tablist" aria-label="Работа с устройствами">
+<button id="tab-connection" type="button" data-pane="connection" role="tab" aria-controls="connection-pane" aria-selected="true">Подключение</button>
+<button id="tab-transfer" type="button" disabled="" data-pane="transfer" role="tab" aria-controls="transfer-pane" aria-selected="false">Передача</button>
+</nav>
+<div class="tab-panels">
+<section id="connection-pane" class="tab-panel" role="tabpanel" aria-labelledby="tab-connection">
+<section id="start" class="panel start-panel">
+<div class="start-settings">
+<div>
+<label class="label" for="connection-mode">Как соединить устройства</label>
+<select id="connection-mode">
+<option value="lan">В одной локальной сети — напрямую</option>
+<option value="internet">Через интернет — любые доступные сети</option>
+</select>
+</div>
+<div>
+<label class="label" for="device-name">Имя устройства — можно изменить</label>
+<input id="device-name" maxlength="40" autocomplete="off" placeholder="Название устройства">
+</div>
+</div>
+<p id="mode-help" class="muted">
+</p>
+<p id="web-discovery-hint" class="muted">Устройства рядом: поиск ПК доступен в приложении Windows. В браузере подключайтесь по ID, QR-коду или ссылке.</p>
+<div class="receive-settings">
+<button type="button" class="button secondary" data-choose-folder="" hidden="">Папка получения</button>
+<span class="receive-folder-name">Файлы загружаются автоматически после подключения.</span>
+</div>
+<div class="start-actions">
+<section id="connect-card" class="panel connection-card">
+<h2>Подключиться</h2>
+<div class="connection-entry">
+<p class="muted">Введите ID или вставьте ссылку с другого устройства.</p>
+<form id="join-form">
+<label class="label" for="invite-input">ID или ссылка с другого устройства</label>
+<div class="input-row">
+<input id="invite-input" type="text" autocomplete="off" spellcheck="false" placeholder="Введите ID или вставьте ссылку" required="">
+<button class="button secondary" type="submit">Подключиться</button>
+</div>
+</form>
+<button id="join-invite" class="button primary" hidden="">Подключиться к устройству <span>↗</span>
+</button>
+</div>
+</section>
+<section id="invite-card" class="panel connection-card">
+<h2>Пригласить</h2>
+<div class="connection-entry">
+<p class="muted">Создайте приглашение и откройте его на втором устройстве.</p>
+<button id="create" class="button primary">Создать подключение <span>↗</span>
+</button>
+</div>
+</section>
+</div>
+<div class="divider">
+</div>
+</section>
+<section id="session" class="session-grid" hidden="">
+<aside class="panel connection-panel">
+<div id="invitation-id" class="invitation-id" hidden="">
+<div class="id-heading"><span>ID подключения</span><button id="copy-id" type="button" class="button secondary">Скопировать ID</button></div>
+<output id="connection-id" translate="no" aria-label="ID подключения"></output>
+<p id="id-status" class="muted">Одно приглашение · 15 минут</p>
+</div>
+        <span class="step">ПОДКЛЮЧЁННОЕ УСТРОЙСТВО</span>
+<div class="connection-state">
+<span id="status-dot" class="status-dot">
+</span>
+<h2 id="connection-title">Ожидаем устройство</h2>
+</div>
+<p id="connection-detail" class="muted">Откройте приглашение на втором устройстве.</p>
+        <div id="invitation">
+<div class="qr-wrap">
+<canvas id="qr" aria-label="QR-код приглашения">
+</canvas>
+</div>
+<p class="qr-help">Сканируйте камерой телефона<br>или отправьте ссылку на другое устройство.</p>
+<button id="copy" class="button secondary full">Скопировать приглашение ↗</button>
+<input id="share-link" class="share-link" readonly="" aria-label="Ссылка-приглашение">
+<small>Ссылка открывает доступ к подключению. Делитесь ею только с получателем.</small>
+</div>
+        <div id="peer-request" class="peer-request" hidden="">
+<p>
+<b id="peer-name">
+</b> хочет подключиться.</p>
+<button id="approve" class="button primary full">Это моё устройство — разрешить</button>
+<button id="reject" class="button quiet full">Отклонить и закрыть</button>
+</div>
         <button id="disconnect" class="button quiet full">Завершить соединение</button>
       </aside>
-      <section class="panel files-panel"><div class="files-heading"><div><span class="step">03 / ФАЙЛЫ</span><h2>Отправляйте и принимайте</h2></div><span id="transport-label" class="transport-label">Ожидаем соединение</span></div>
-        <label id="drop" class="drop disabled"><span class="drop-icon">↥</span><strong>Выберите файлы</strong><span>или перетащите их сюда</span><input id="files" type="file" multiple disabled><span id="file-limit" class="limit">Размер зависит от браузера получателя</span></label>
-        <p id="save-hint" class="muted save-hint"></p><div id="transfers" class="transfers" aria-live="polite"><div id="empty" class="empty">Здесь появятся входящие и исходящие файлы.</div></div>
-      </section>
-    </section>
-    <section class="global-statistics" id="transfer-statistics" data-statistics-endpoint="api.php" aria-labelledby="stats-heading">
+</section>
+</section>
+<section id="transfer-pane" class="tab-panel" hidden="" role="tabpanel" aria-labelledby="tab-transfer">
+<div id="transfer-workspace">
+<div class="transfer-columns">
+<section class="panel">
+<h2>Отправка файлов</h2>
+<span id="transport-label" class="transport-label">Ожидаем соединение</span>
+<label id="drop" class="drop disabled">
+<span class="drop-icon">↥</span>
+<strong>Выберите файлы</strong>
+<span>или перетащите их сюда</span>
+<input id="files" type="file" multiple="" disabled="">
+</label>
+<span id="file-limit" class="limit">Размер зависит от браузера получателя</span>
+<div id="outgoing-transfers" class="transfers" aria-live="polite">
+</div>
+</section>
+<section class="panel">
+<h2>Получение файлов</h2>
+<div class="receive-settings">
+<button class="button secondary" type="button" data-choose-folder="" hidden="">Папка получения</button>
+<span class="receive-folder-name">Приём без подтверждения.</span>
+</div>
+<p id="save-hint" class="muted save-hint">
+</p>
+<div id="transfers" class="transfers" aria-live="polite">
+<div id="empty" class="empty">Здесь появятся входящие и исходящие файлы.</div>
+</div>
+</section>
+</div>
+</div>
+</section>
+</div>
+<section class="global-statistics" id="transfer-statistics" data-statistics-endpoint="api.php" aria-labelledby="stats-heading">
       <h2 id="stats-heading">Уже передано через Nearby</h2>
-      <div class="statistics-values"><div><strong id="stats-files">—</strong><span>файлов передано</span></div><div><button id="stats-volume" type="button" aria-expanded="false" aria-controls="stats-exact" aria-label="Точное число байтов" disabled>—</button><span>данных · нажмите на объём</span></div><div><strong id="stats-uses">—</strong><span id="stats-uses-label">количество использований</span></div></div>
-      <p id="stats-uses-help">Каждое подключение двух устройств, включая повторные.</p>
-      <p id="stats-exact" hidden></p><p id="stats-state" role="status">Загружаем общий итог…</p>
-      <p class="statistics-privacy">Общий итог браузерной версии и приложения Windows. Содержимое и имена файлов в статистику не входят.</p>
-    </section>
-    <section class="notes"><article><span>↔</span><h3>Два способа передачи</h3><p>В одной сети файлы идут напрямую через WebRTC. В интернет-режиме сервер временно буферизует зашифрованные части. Содержимое и имена шифруются на устройствах; ключ находится только в ссылке-приглашении.</p></article><article><span>◎</span><h3>Под вашим контролем</h3><p>Вы подтверждаете второе устройство и каждый входящий файл. Для подключения к сайту нужен интернет. Для общего счётчика отправляем размер и ID завершённой передачи.</p></article><article><span>◷</span><h3>Держите вкладки открытыми</h3><p>Не блокируйте телефон во время передачи. Если устройства в разных сетях или прямое соединение недоступно, выберите «Через интернет».</p></article></section>
-  </main><footer>Nearby Web · Dev.KiaCom <a href="https://github.com/KiaComRu/Nearby/blob/main/docs/BROWSER-MODE.md" target="_blank" rel="noopener noreferrer">Как это работает ↗</a><a href="/">Скачать Windows-приложение ↗</a></footer>
-</body></html>
+      <div class="statistics-values">
+<div>
+<strong id="stats-files">—</strong>
+<span>файлов передано</span>
+</div>
+<div>
+<button id="stats-volume" type="button" aria-expanded="false" aria-controls="stats-exact" aria-label="Точное число байтов" disabled="">—</button>
+<span>данных · нажмите на объём</span>
+</div>
+<div>
+<strong id="stats-uses">—</strong>
+<span id="stats-uses-label">количество использований</span>
+</div>
+</div>
+
+      <p id="stats-exact" hidden="">
+</p>
+<p id="stats-state" role="status">Загружаем общий итог…</p>
+
+    <details class="statistics-help">
+<summary>О счётчике</summary>
+<div class="statistics-explanation">
+<p id="stats-uses-help">Каждое подключение двух устройств, включая повторные.</p>
+<p class="statistics-privacy">Общий итог браузерной версии и приложения Windows. Содержимое и имена файлов в статистику не входят.</p>
+</div>
+</details>
+</section>
+
+  </main>
+<footer>Nearby Web · Dev.KiaCom <a href="https://github.com/KiaComRu/Nearby/blob/main/docs/BROWSER-MODE.md" target="_blank" rel="noopener noreferrer">Как это работает ↗</a>
+<a href="/">Скачать Windows-приложение ↗</a>
+</footer>
+
+
+
+
+</body>
+</html>

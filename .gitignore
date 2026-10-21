@@ -17,3 +17,5 @@ landing/
 browser/config.private.php
 **/device-identity.json
 **/trusted-devices.json
+
+browser/app-[0-9]*.js

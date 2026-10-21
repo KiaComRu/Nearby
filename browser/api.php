@@ -64,8 +64,10 @@ try {
     if ($now - $rate['window'] >= 60) $rate = ['window' => $now, 'requests' => 0, 'creates' => 0, 'relay' => 0];
     if ($relayRequest) $rate['relay'] = ($rate['relay'] ?? 0) + 1; else $rate['requests']++;
     if (in_array($action, ['create', 'local-session'], true)) $rate['creates']++;
+    if ($action === 'resolve-id') $rate['idLookups'] = ($rate['idLookups'] ?? 0) + 1;
     writeState($budget, $rate); flock($budget, LOCK_UN); fclose($budget);
     if ($rate['requests'] > 240 || $rate['creates'] > 10 || ($rate['relay'] ?? 0) > 1800) fail(429, 'Слишком много запросов. Подождите минуту.');
+    if ($action === 'resolve-id' && ($rate['idLookups'] ?? 0) > 12) fail(429, 'Слишком много попыток ввода ID. Подождите минуту.');
 
     if ($action === 'stats') reply(200, transferStatistics($base));
     if ($action === 'local-session') reply(201, ['token' => localStatisticsToken($base)]);
@@ -85,6 +87,12 @@ try {
     if ($action === 'create') {
         $mode = $input['mode'] ?? 'lan';
         if (!in_array($mode, ['lan', 'internet'], true)) fail(400, 'Некорректный режим соединения.');
+        $idLookup = $input['idLookup'] ?? null;
+        $idInviteDigest = $input['idInviteDigest'] ?? null;
+        if ($idLookup !== null || $idInviteDigest !== null) {
+            if (!is_string($idLookup) || !preg_match('/^[a-f0-9]{64}$/D', $idLookup) ||
+                !is_string($idInviteDigest) || !preg_match('/^[a-f0-9]{64}$/D', $idInviteDigest)) fail(400, 'Некорректный ID приглашения.');
+        }
         $global = fopen($base . '/create.lock', 'c+');
         if (!$global || !flock($global, LOCK_EX)) throw new RuntimeException('Creation lock failed');
         $active = 0; $internetActive = 0;
@@ -93,7 +101,10 @@ try {
             if (!$f) continue;
             if (flock($f, LOCK_EX | LOCK_NB)) {
                 $old = json_decode(stream_get_contents($f), true);
-                if (!$old || ($old['expires'] ?? 0) < $now || ($old['closed'] ?? false)) unlink($path); else { $active++; if (($old['mode'] ?? 'lan') === 'internet') $internetActive++; }
+                if (!$old || ($old['expires'] ?? 0) < $now || ($old['closed'] ?? false)) unlink($path); else {
+                    if ($idLookup !== null && ($old['idLookup'] ?? null) === $idLookup) fail(409, 'Этот ID уже используется. Создайте новое подключение.');
+                    $active++; if (($old['mode'] ?? 'lan') === 'internet') $internetActive++;
+                }
                 flock($f, LOCK_UN);
             } else $active++;
             fclose($f);
@@ -103,10 +114,11 @@ try {
         }
         if ($active >= 200) { flock($global, LOCK_UN); fclose($global); fail(503, 'Сервис занят. Попробуйте позже.'); }
         if ($mode === 'internet' && $internetActive >= 20) fail(503, 'Интернет-режим сейчас занят. Попробуйте позже.');
-        $room = hexToken(16); $host = hexToken(); $invite = hexToken();
-        $state = ['host' => hash('sha256', $host), 'invite' => hash('sha256', $invite), 'guest' => null,
+        $room = hexToken(16); $host = hexToken(); $invite = $idLookup === null ? hexToken() : null;
+        $state = ['host' => hash('sha256', $host), 'invite' => $idInviteDigest ?? hash('sha256', $invite), 'guest' => null,
             'hostName' => nameValue($input['name'] ?? ''), 'guestName' => null, 'approved' => false,
             'expires' => $now + ($mode === 'internet' ? 7200 : 900), 'created' => $now, 'seq' => 0, 'messages' => [], 'closed' => false, 'mode' => $mode];
+        if ($idLookup !== null) { $state['idLookup'] = $idLookup; $state['inviteExpires'] = $now + 900; }
         if ($mode === 'internet') {
             $empty = ['seq' => 0, 'ack' => 0, 'frames' => [], 'recent' => []];
             $state['relay'] = ['host' => $empty, 'guest' => $empty]; $state['relayLast'] = ['host' => $now, 'guest' => $now];
@@ -115,7 +127,25 @@ try {
         if (!$f) throw new RuntimeException('Room creation failed');
         chmod($base . '/room-' . $room . '.json', 0600); writeState($f, $state); fclose($f);
         flock($global, LOCK_UN); fclose($global);
-        reply(201, ['room' => $room, 'token' => $host, 'invite' => $invite, 'expires' => $state['expires'], 'mode' => $mode]);
+        reply(201, ['room' => $room, 'token' => $host, 'invite' => $invite, 'expires' => $state['expires'], 'mode' => $mode,
+            'idEnabled' => $idLookup !== null, 'inviteExpires' => $state['inviteExpires'] ?? $state['expires']]);
+    }
+    if ($action === 'resolve-id') {
+        $lookup = $input['lookup'] ?? null;
+        if (!is_string($lookup) || !preg_match('/^[a-f0-9]{64}$/D', $lookup)) fail(400, 'Некорректный ID приглашения.');
+        // At most 200 rooms exist; no separate ID index or plaintext secret is stored.
+        foreach (glob($base . '/room-*.json') ?: [] as $candidate) {
+            $handle = @fopen($candidate, 'r');
+            if (!$handle) continue;
+            if (!flock($handle, LOCK_SH)) { fclose($handle); continue; }
+            $candidateState = json_decode(stream_get_contents($handle), true);
+            flock($handle, LOCK_UN); fclose($handle);
+            if (!is_array($candidateState) || !isset($candidateState['idLookup']) || !hash_equals($candidateState['idLookup'], $lookup)) continue;
+            if (($candidateState['inviteExpires'] ?? 0) < $now || $candidateState['expires'] < $now ||
+                $candidateState['closed'] || $candidateState['guest'] !== null) break;
+            reply(200, ['room' => substr(basename($candidate), 5, 32), 'mode' => $candidateState['mode'] ?? 'lan', 'expires' => $candidateState['inviteExpires']]);
+        }
+        fail(404, 'ID не найден, истёк или уже использован. Создайте новое приглашение.');
     }
     $room = $input['room'] ?? '';
     if (!is_string($room) || !preg_match('/^[a-f0-9]{32}$/D', $room)) fail(400, 'Некорректная комната.');
@@ -129,6 +159,7 @@ try {
     if (!is_string($token) || !preg_match('/^[a-f0-9]{64}$/D', $token)) fail(403, 'Недействительный ключ.');
     $digest = hash('sha256', $token);
     if ($action === 'join') {
+        if (($state['inviteExpires'] ?? $state['expires']) < $now) fail(410, 'Срок приглашения истёк. Создайте новое подключение.');
         if (!hash_equals($state['invite'], $digest)) fail(403, 'Недействительное приглашение.');
         if ($state['guest'] !== null) fail(409, 'Приглашение уже использовано. Создайте новое.');
         $guest = hexToken(); $state['guest'] = hash('sha256', $guest);
