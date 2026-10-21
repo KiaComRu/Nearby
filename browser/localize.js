@@ -3,6 +3,18 @@
   const languages = ['en', 'hi', 'zh-CN', 'es'];
   const supported = ['ru', ...languages];
   const rows = [
+    ["Название файла", "File name", "फ़ाइल का नाम", "文件名", "Nombre del archivo"],
+    ["Размер", "Size", "आकार", "大小", "Tamaño"],
+    ["Дата и время", "Date and time", "तारीख और समय", "日期和时间", "Fecha y hora"],
+    ["Статус", "Status", "स्थिति", "状态", "Estado"],
+    ["Действия", "Actions", "कार्रवाइयाँ", "操作", "Acciones"],
+    ["Открыть", "Open", "खोलें", "打开", "Abrir"],
+    ["Удалить из списка", "Remove from list", "सूची से हटाएँ", "从列表移除", "Eliminar de la lista"],
+    ["Отправленные файлы", "Sent files", "भेजी गई फ़ाइलें", "已发送文件", "Archivos enviados"],
+    ["Полученные файлы", "Received files", "मिली हुई फ़ाइलें", "已接收文件", "Archivos recibidos"],
+    ["Здесь появятся полученные файлы.", "Received files will appear here.", "मिली हुई फ़ाइलें यहाँ दिखेंगी।", "接收的文件将在此处显示。", "Los archivos recibidos aparecerán aquí."],
+    ["Сначала сохраните принятые файлы и удалите их из списка. Вкладка хранит не более 100 МиБ.", "Save received files and remove them from the list first. This tab holds up to 100 MiB.", "पहले मिली फ़ाइलें सहेजें और सूची से हटाएँ। यह टैब अधिकतम 100 MiB रखता है।", "请先保存接收的文件并从列表移除。此标签页最多保留 100 MiB。", "Primero guarda los archivos recibidos y elimínalos de la lista. Esta pestaña guarda hasta 100 MiB."],
+
     ["Устройства", "Devices", "डिवाइस", "设备", "Dispositivos"],
     ["Подключённые устройства", "Connected devices", "कनेक्ट किए गए डिवाइस", "已连接的设备", "Dispositivos conectados"],
     ["Выберите получателя, затем откройте вкладку «Передача».", "Choose a recipient, then open the Transfer tab.", "प्राप्तकर्ता चुनें, फिर ट्रांसफ़र टैब खोलें।", "选择接收设备，然后打开“传输”标签页。", "Elige un destinatario y abre la pestaña Transferencia."],

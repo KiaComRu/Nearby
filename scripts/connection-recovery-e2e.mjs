@@ -109,7 +109,7 @@ try {
     if (scenario === 'during-transfer') {
       for (const page of [host, guest]) await page.locator('.transfer.error').filter({ hasText: 'unfinished.bin' }).waitFor();
       assert.equal(await guest.getByText('queued.bin', { exact: true }).count(), 0, 'old queue must not silently continue on a new channel');
-      assert.ok(await host.getByText('Сохранить файл ↓', { exact: true }).isVisible(), 'completed file remains available');
+      assert.ok(await host.getByText('Открыть', { exact: true }).isVisible(), 'completed file remains available');
     }
     await transfer(host, guest, `after-${scenario}.bin`, randomBytes(300007));
     await transfer(guest, host, `back-${scenario}.bin`, randomBytes(240001));

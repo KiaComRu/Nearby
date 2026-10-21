@@ -173,7 +173,7 @@ function register(session, peerName = '') {
     onOffer: (connection, spec, receivingLink) => { void showIncoming(connection, spec, receivingLink); },
     onProgress: (connection, id, bytes, direction) => { const row = rows.get(rowKey(connection, id)); if (row) { row.progress.value = bytes; row.detail.textContent = `${direction === 'sending' ? 'Отправляем' : 'Принимаем'}: ${sizes(bytes)} / ${sizes(row.size)}`; } },
     onComplete: complete,
-    onError: (connection, id, message) => { const row = rows.get(rowKey(connection, id)); if (row) { row.element.classList.add('error'); row.detail.textContent = message; row.actions.replaceChildren(); row.progress.remove(); row.done = true; } },
+    onError: (connection, id, message) => { const row = rows.get(rowKey(connection, id)); if (row) { row.element.classList.add('error'); row.detail.textContent = message; row.done = true; row.sourceFile = null; row.actions.replaceChildren(); row.progress.remove(); deleteButton(row); } },
     onClosed: (connection, message, expected) => {
       if (appClosed) return;
       if (selectedId === connection.id) { selectedId = null; selectionLost = true; }
@@ -229,21 +229,45 @@ async function join(value) {
 }
 function rowFor(connection, spec, direction) {
   if (direction === 'incoming') $('empty').hidden = true;
-  const element = document.createElement('article'); element.className = 'transfer'; element.dataset.id = spec.id;
+  const element = document.createElement('tr'); element.className = 'transfer'; element.dataset.id = spec.id;
   const title = document.createElement('div'); title.className = 'transfer-title'; title.textContent = spec.name;
-  const meta = document.createElement('div'); meta.className = 'transfer-meta'; meta.textContent = `${direction === 'incoming' ? '↓ Входящий' : '↑ Исходящий'} · ${sizes(spec.size)}`;
+  const size = document.createElement('td'); size.className = 'transfer-size'; size.textContent = sizes(spec.size);
+  const date = document.createElement('td'), time = document.createElement('time'), createdAt = new Date();
+  date.className = 'transfer-date'; time.dateTime = createdAt.toISOString(); time.textContent = new Intl.DateTimeFormat(document.documentElement.lang || 'ru', { dateStyle: 'short', timeStyle: 'medium' }).format(createdAt); date.append(time);
   const detail = document.createElement('div'); detail.className = 'transfer-detail'; detail.textContent = direction === 'incoming' ? 'Принимаем автоматически…' : 'Подготавливаем передачу…';
   const progress = document.createElement('progress'); progress.max = spec.size || 1; progress.value = 0; progress.setAttribute('aria-label', 'Прогресс передачи');
-  const actions = document.createElement('div'); actions.className = 'transfer-actions';
+  const actions = document.createElement('td'); actions.className = 'transfer-actions';
   const peerName = document.createElement('div'); peerName.className = 'transfer-peer'; peerName.textContent = displayName(connection);
-  element.append(title, peerName, meta, detail, progress, actions); $(direction === 'incoming' ? 'transfers' : 'outgoing-transfers').prepend(element);
-  const row = { element, detail, progress, actions, size: spec.size, done: false, direction, connection }; rows.set(rowKey(connection, spec.id), row); return row;
+  const name = document.createElement('td'), state = document.createElement('td'); name.append(title, peerName); state.append(detail, progress);
+  element.append(name, size, date, state, actions); $(direction === 'incoming' ? 'transfers' : 'outgoing-transfers').prepend(element);
+  const row = { element, detail, progress, actions, id: spec.id, name: spec.name, size: spec.size, done: false, direction, connection }; rows.set(rowKey(connection, spec.id), row); return row;
+}
+function deleteButton(row) {
+  const remove = button('×', () => {
+    if (!row.done) return;
+    if (row.url) { URL.revokeObjectURL(row.url); objectUrls.delete(row.url); row.url = null; }
+    row.releaseMemory?.(); row.sourceFile = null; row.fileHandle = null;
+    row.element.remove(); rows.delete(rowKey(row.connection, row.id));
+    $('empty').hidden = $('transfers').children.length > 0;
+  });
+  remove.classList.add('remove-transfer'); remove.setAttribute('aria-label', 'Удалить из списка'); remove.title = 'Удалить из списка'; row.actions.append(remove);
+}
+function fileActions(row, blob) {
+  if (!rows.has(rowKey(row.connection, row.id))) return;
+  // Only passive formats get a preview MIME type. HTML/SVG and other active
+  // content remain downloads and cannot run scripts in Nearby's origin.
+  const types = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif', bmp: 'image/bmp', pdf: 'application/pdf', txt: 'text/plain', csv: 'text/plain', json: 'text/plain', mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', mp4: 'video/mp4', webm: 'video/webm' };
+  const type = types[row.name.split('.').at(-1).toLowerCase()] || 'application/octet-stream';
+  row.url = URL.createObjectURL(blob.slice(0, blob.size, type)); objectUrls.add(row.url);
+  const open = document.createElement('a'); open.className = 'open-transfer'; open.href = row.url; open.textContent = 'Открыть'; open.target = '_blank'; open.rel = 'noopener noreferrer';
+  if (type === 'application/octet-stream') open.download = row.name;
+  row.actions.prepend(open);
 }
 function button(label, action, primary = false) { const b = document.createElement('button'); b.className = `button ${primary ? 'primary' : 'secondary'}`; b.textContent = label; b.onclick = action; return b; }
 function cancelButton(fileLink, id, actions) { actions.append(button('Отменить', () => fileLink.cancel(id))); }
 function memorySink(spec, row) {
   if (spec.size > MEMORY_LIMIT) throw new Error('Для обычного скачивания доступны файлы до 100 МиБ. Для больших файлов используйте Chrome/Edge на ПК с разрешённой записью на диск.');
-  if (bufferedBytes + spec.size > MEMORY_LIMIT) throw new Error('Сначала сохраните принятые файлы и нажмите «Убрать из памяти». Вкладка хранит не более 100 МиБ.');
+  if (bufferedBytes + spec.size > MEMORY_LIMIT) throw new Error('Сначала сохраните принятые файлы и удалите их из списка. Вкладка хранит не более 100 МиБ.');
   bufferedBytes += spec.size;
   let parts = [], reserved = true;
   row.releaseMemory = () => { if (reserved) { bufferedBytes -= spec.size; reserved = false; } };
@@ -257,6 +281,7 @@ async function showIncoming(connection, spec, receivingLink) {
     if (receiveDirectory) {
       const destination = `${crypto.randomUUID()}-${spec.name}`;
       const handle = await receiveDirectory.getFileHandle(destination, { create: true });
+      row.fileHandle = handle;
       const writable = await handle.createWritable();
       sink = { write: data => writable.write(data), close: async () => { await writable.close(); return null; }, abort: async () => { await writable.abort(); await receiveDirectory.removeEntry(destination); } };
     } else sink = memorySink(spec, row);
@@ -279,16 +304,16 @@ for (const control of document.querySelectorAll('[data-choose-folder]')) {
 }
 function complete(connection, id, direction, blob) {
   const row = rows.get(rowKey(connection, id)); if (!row || row.done) return;
-  row.done = true; row.progress.value = row.progress.max; row.actions.replaceChildren();
+  row.done = true; row.progress.remove(); row.actions.replaceChildren(); deleteButton(row);
   row.detail.textContent = direction === 'sent' ? 'Передан получателю.' : blob ? 'Файл принят. Загрузка началась автоматически.' : 'Сохранён в выбранную папку.';
   if (direction === 'received') void connection.reportStatistics('record-transfer', { id, size: row.size });
   if (blob) {
-    const url = URL.createObjectURL(blob); objectUrls.add(url);
-    const save = document.createElement('a'); save.className = 'button primary'; save.href = url; save.download = row.element.querySelector('.transfer-title').textContent; save.textContent = 'Сохранить файл ↓'; row.actions.append(save);
-    // Browsers may apply their own multiple-download policy. Keep a visible save
-    // link and retain the blob as a fallback instead of silently losing a file.
-    save.click();
-    row.actions.append(button('Убрать из памяти', () => { URL.revokeObjectURL(url); objectUrls.delete(url); row.releaseMemory?.(); row.actions.replaceChildren(); row.detail.textContent = 'Файл удалён из памяти вкладки.'; }));
+    fileActions(row, blob);
+    const save = document.createElement('a'); save.href = row.url; save.download = row.name; save.click();
+  } else if (row.sourceFile) {
+    fileActions(row, row.sourceFile); row.sourceFile = null;
+  } else if (row.fileHandle) {
+    row.fileHandle.getFile().then(file => fileActions(row, file)).catch(() => { /* The file may have been moved outside Nearby. */ });
   }
 }
 async function sendFiles(files) {
@@ -301,7 +326,7 @@ async function sendFiles(files) {
       const id = crypto.randomUUID();
       try {
         validateFileSpec({ id, name: file.name, size: file.size }, fileLink.peerLimit);
-        const row = rowFor(connection, { id, name: file.name, size: file.size }, 'outgoing'); cancelButton(fileLink, id, row.actions);
+        const row = rowFor(connection, { id, name: file.name, size: file.size }, 'outgoing'); row.sourceFile = file; cancelButton(fileLink, id, row.actions);
         await fileLink.sendFile(file, id);
       } catch (error) { if (!rows.has(rowKey(connection, id))) notice(`${file.name}: ${error.message}`, true); }
     }

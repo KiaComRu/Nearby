@@ -46,13 +46,35 @@ try {
     const download = await downloading; assert.equal(download.suggestedFilename(), name);
     assert.equal(hash(await readFile(await download.path())), hash(bytes));
     count++; size += bytes.length;
-    await card.getByRole('button', { name: 'Убрать из памяти' }).click();
+    assert.equal(await card.locator('td').count(), 5);
+    const cells = await card.locator('td').evaluateAll(nodes => nodes.map(n => ({ x: n.getBoundingClientRect().x, y: n.getBoundingClientRect().y })));
+    assert.ok(cells.every(c => Math.abs(c.y - cells[0].y) < 1), 'all cells belong to the same table row'); assert.ok(cells.every((c, i) => !i || c.x > cells[i-1].x));
+    const started = Date.parse(await card.locator('time').getAttribute('datetime')); assert.ok(Math.abs(Date.now() - started) < 60000);
+    const open = card.getByRole('link', { name: 'Открыть', exact: true }); const url = await open.getAttribute('href'); assert.ok(url.startsWith('blob:'));
+    assert.equal(await open.getAttribute('rel'), 'noopener noreferrer');
+    const preview = await to.evaluate(async url => { const response = await fetch(url); return { type: response.headers.get('content-type'), bytes: [...new Uint8Array(await response.arrayBuffer())] }; }, url);
+    assert.equal(hash(Buffer.from(preview.bytes)), hash(bytes));
+    assert.equal(preview.type, name.endsWith('.txt') ? 'text/plain' : 'application/octet-stream');
+    if (name === 'preview.txt') { const opened = to.waitForEvent('popup'); await open.click(); const previewPage = await opened; await previewPage.waitForLoadState(); assert.equal(await previewPage.locator('body').innerText(), bytes.toString()); await previewPage.close(); }
+    if (name.endsWith('.html')) assert.equal(await open.getAttribute('download'), name);
+    if (name === 'private-to-phone.bin') {
+      await to.screenshot({ path: 'artifacts/transfer-table-mobile.png' });
+      await open.scrollIntoViewIfNeeded(); await to.screenshot({ path: 'artifacts/transfer-table-mobile-actions.png' });
+      await from.setViewportSize({ width: 1440, height: 1000 }); await from.screenshot({ path: 'artifacts/transfer-table-desktop.png' });
+    }
+    await card.getByRole('button', { name: 'Удалить из списка' }).click(); assert.equal(await card.count(), 0);
+    assert.ok(await to.evaluate(url => fetch(url).then(() => false, () => true), url), 'removed blob URL must be revoked');
+    assert.ok(await to.locator('#empty').isVisible());
+    const sent = from.locator('#outgoing-transfers .transfer').filter({ has: from.getByText(name, { exact: true }) }); await sent.getByRole('link', { name: 'Открыть', exact: true }).waitFor();
+    await sent.getByRole('button', { name: 'Удалить из списка' }).click(); assert.equal(await sent.count(), 0);
     await from.waitForFunction(() => !document.querySelector('#files').disabled);
     console.log(`Internet relay: ${name}, ${bytes.length} bytes, SHA-256 verified`);
   }
   await transfer(host, guest, 'private-to-phone.bin', randomBytes(1024 * 1024 + 31));
   await transfer(guest, host, 'private-to-pc.bin', randomBytes(1024 * 1024 + 7));
   await transfer(host, guest, 'private-empty.txt', Buffer.alloc(0));
+  await transfer(host, guest, 'preview.txt', Buffer.from('Nearby preview works.'));
+  await transfer(host, guest, 'untrusted.html', Buffer.from('<script>opener.alert(1)</script>'));
   await host.evaluate(() => { const files = new DataTransfer(); files.items.add(new File([new ArrayBuffer(100 * 1024 ** 2 + 1)], 'private-too-large.bin')); const input = document.querySelector('#files'); input.files = files.files; input.dispatchEvent(new Event('change', { bubbles: true })); });
   await host.locator('#notice').filter({ hasText: 'Недопустимое имя или размер файла' }).waitFor();
   assert.equal(await guest.getByText('private-too-large.bin', { exact: true }).count(), 0);

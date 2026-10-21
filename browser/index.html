@@ -22,15 +22,15 @@
   <link rel="apple-touch-icon" href="apple-touch-icon.png" sizes="180x180">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="localize.css?v=tabs-1">
-<script defer="" src="localize.js?v=570e533a7b1f">
+<script defer="" src="localize.js?v=e913d6b06c4f">
 </script>
   <script defer="" src="vendor/qrcode.js">
 </script>
-<script type="module" src="app-0.5.5.js?v=d9181265cc7a">
+<script type="module" src="app-0.5.6.js?v=856588a5a1a5">
 </script>
 <script defer="" src="statistics.js?v=uses-1">
 </script>
-<link rel="stylesheet" href="workspace.css?v=40d80050fa44">
+<link rel="stylesheet" href="workspace.css?v=e8be237777ec">
 </head>
 <body class="compact-app web-app">
   <header class="header">
@@ -187,8 +187,7 @@
 <input id="files" type="file" multiple="" disabled="">
 </label>
 <span id="file-limit" class="limit">Размер зависит от браузера получателя</span>
-<div id="outgoing-transfers" class="transfers" aria-live="polite">
-</div>
+<div class="transfer-scroll" tabindex="0" role="region" aria-label="Отправленные файлы"><table class="transfer-table"><thead><tr><th scope="col">Название файла</th><th scope="col">Размер</th><th scope="col">Дата и время</th><th scope="col">Статус</th><th scope="col">Действия</th></tr></thead><tbody id="outgoing-transfers" aria-live="polite"></tbody></table></div>
 </section>
 <section class="panel">
 <h2>Получение файлов</h2>
@@ -198,9 +197,7 @@
 </div>
 <p id="save-hint" class="muted save-hint">
 </p>
-<div id="transfers" class="transfers" aria-live="polite">
-<div id="empty" class="empty">Здесь появятся входящие и исходящие файлы.</div>
-</div>
+<div class="transfer-scroll" tabindex="0" role="region" aria-label="Полученные файлы"><table class="transfer-table"><thead><tr><th scope="col">Название файла</th><th scope="col">Размер</th><th scope="col">Дата и время</th><th scope="col">Статус</th><th scope="col">Действия</th></tr></thead><tbody id="transfers" aria-live="polite"></tbody></table><p id="empty" class="empty">Здесь появятся полученные файлы.</p></div>
 </section>
 </div>
 </div>

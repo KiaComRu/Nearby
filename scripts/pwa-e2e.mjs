@@ -92,7 +92,7 @@ try {
   const downloading = guest.waitForEvent('download');
   await page.locator('#files').setInputFiles({ name, mimeType: 'application/octet-stream', buffer: bytes });
   const card = guest.locator('.transfer').filter({ has: guest.getByText(name, { exact: true }) });
-  await card.getByRole('link', { name: 'Сохранить файл' }).waitFor({ timeout: 60000 });
+  await card.getByRole('link', { name: 'Открыть' }).waitFor({ timeout: 60000 });
   assert.equal(hash(await readFile(await (await downloading).path())), hash(bytes));
   assert.equal(await page.evaluate(() => window.pwaSessionMarker), 'still-open');
   assert.deepEqual(await cacheKeys(), expected); assert.deepEqual(await guest.evaluate(async () => { const result = []; for (const key of await caches.keys()) for (const item of await (await caches.open(key)).keys()) result.push(item.url); return result.sort(); }), expected);
