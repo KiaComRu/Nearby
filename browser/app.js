@@ -1,7 +1,7 @@
 import { FileLink, MEMORY_LIMIT, DISK_LIMIT, validateFileSpec } from './transfer.mjs';
 import { HttpsRelayChannel, newRelaySecret } from './relay.mjs';
 import { ProbeChannel } from './probe-channel.mjs';
-import { newInvitationId, normalizeInvitationId, formatInvitationId, invitationCredentials } from './invitation-id.mjs';
+import { normalizeInvitationId, formatInvitationId, invitationCredentials, shortInvitationLookup, invitationKeyExchange, sharedInvitationSecret } from './invitation-id.mjs?v=numeric-1';
 const $ = id => document.getElementById(id);
 // Some mobile browsers expose the picker but cannot write to its selected handle.
 const mobileDevice = navigator.userAgentData?.mobile === true || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (/Mac/i.test(navigator.platform || '') && navigator.maxTouchPoints > 1);
@@ -115,15 +115,15 @@ async function create() {
   $('create').disabled = true;
   try {
     const mode = $('connection-mode').value;
-    const code = newInvitationId(), credentials = await invitationCredentials(code);
-    const result = await api('create', { name: deviceName(), mode, idLookup: credentials.lookup, idInviteDigest: credentials.inviteDigest }, true);
-    const idEnabled = result.idEnabled === true;
-    if (result.mode !== mode) throw new Error('Обновите страницу на обоих устройствах и создайте новое приглашение.');
-    session = { room: result.room, token: result.token, role: 'host', mode, relaySecret: mode !== 'lan' ? (idEnabled ? credentials.relaySecret : newRelaySecret()) : null };
-    const url = new URL(location.pathname, location.origin); url.hash = new URLSearchParams({ room: result.room, key: idEnabled ? credentials.token : result.invite, ...(mode !== 'lan' ? { mode, secret: session.relaySecret } : {}) }).toString();
+    const exchange = await invitationKeyExchange();
+    const result = await api('create', { name: deviceName(), mode, shortId: true, idPublicKey: exchange.publicKey }, true);
+    const idEnabled = result.shortId === true && /^\d{9}$/.test(result.id || '');
+    if (!idEnabled || result.mode !== mode) throw new Error('Обновите страницу на обоих устройствах и создайте новое приглашение.');
+    session = { room: result.room, token: result.token, role: 'host', mode, relaySecret: mode !== 'lan' ? newRelaySecret() : null, idPrivateKey: exchange.privateKey };
+    const url = new URL(location.pathname, location.origin); url.hash = new URLSearchParams({ room: result.room, key: result.invite, ...(mode !== 'lan' ? { mode, secret: session.relaySecret } : {}) }).toString();
     invitation = url.href; $('share-link').value = invitation;
     showSession();
-    if (idEnabled) showInvitationId(code, result.inviteExpires);
+    showInvitationId(result.id, result.inviteExpires);
     try { await window.QRCode.toCanvas($('qr'), invitation, { width: 190, margin: 1, errorCorrectionLevel: 'M', color: { dark: '#080d18', light: '#ffffff' } }); }
     catch { notice('QR-код не удалось создать. Используйте ссылку-приглашение.'); }
     poll();
@@ -136,12 +136,20 @@ async function join(value) {
   try {
     let invite;
     if (/^[\da-z\s-]+$/i.test(value.trim())) {
-      const credentials = await invitationCredentials(normalizeInvitationId(value));
-      const resolved = await api('resolve-id', { lookup: credentials.lookup }, true);
-      invite = { room: resolved.room, token: credentials.token, mode: resolved.mode, relaySecret: resolved.mode !== 'lan' ? credentials.relaySecret : null };
+      const code = normalizeInvitationId(value);
+      if (code.length === 9) {
+        const resolved = await api('resolve-id', { lookup: await shortInvitationLookup(code) }, true);
+        const exchange = await invitationKeyExchange();
+        invite = { room: resolved.room, token: resolved.token, mode: resolved.mode, idPublicKey: exchange.publicKey,
+          relaySecret: await sharedInvitationSecret(exchange.privateKey, resolved.idPublicKey, resolved.room) };
+      } else {
+        const credentials = await invitationCredentials(code);
+        const resolved = await api('resolve-id', { lookup: credentials.lookup }, true);
+        invite = { room: resolved.room, token: credentials.token, mode: resolved.mode, relaySecret: resolved.mode !== 'lan' ? credentials.relaySecret : null };
+      }
     } else invite = parseInvite(value);
     // The encryption secret stays in memory; it must never be posted to PHP.
-    const result = await api('join', { room: invite.room, token: invite.token, name: deviceName() }, true);
+    const result = await api('join', { room: invite.room, token: invite.token, name: deviceName(), ...(invite.idPublicKey ? { idPublicKey: invite.idPublicKey } : {}) }, true);
     if ((result.mode || 'lan') !== invite.mode) throw new Error('Режим приглашения изменён. Попросите новую полную ссылку.');
     session = { room: invite.room, token: result.token, role: 'guest', mode: invite.mode, relaySecret: invite.relaySecret };
     $('connection-mode').value = invite.mode; describeMode();
@@ -281,7 +289,15 @@ async function poll() {
       peerDisplayName = result.guestName;
       status('Разрешить подключение?', 'Убедитесь, что приглашение открыл ваш получатель.');
     }
-    if (result.approved && !started) { $('peer-request').hidden = true; $('invitation').hidden = true; hideInvitationId(); await startPeer(); }
+    if (result.approved && !started) {
+      if (session.role === 'host' && session.idPrivateKey && result.guestPublicKey) {
+        const secret = await sharedInvitationSecret(session.idPrivateKey, result.guestPublicKey, session.room);
+        if (stopped) return;
+        session.relaySecret = secret;
+      }
+      session.idPrivateKey = null;
+      $('peer-request').hidden = true; $('invitation').hidden = true; hideInvitationId(); await startPeer();
+    }
     if (started) await applyTransport(result.transport);
     if (transport === 'direct' && directBroken) await recoverDirect();
     if (started && transport !== 'relay') for (const message of result.messages) await receiveSignal(message.body);
@@ -423,7 +439,7 @@ function failConnection(message) { notice(message, true); status('Соедине
 function stopLocal() {
   stopped = true; connectionReady = false; clearTimeout(pollTimer); clearTimeout(connectionTimer); clearTimeout(disconnectTimer);
   hideInvitationId();
-  link?.close(); probeChannel?.close(); peer?.close(); relayChannel?.close(); if (session) session.relaySecret = null;
+  link?.close(); probeChannel?.close(); peer?.close(); relayChannel?.close(); if (session) { session.relaySecret = null; session.idPrivateKey = null; }
   $('files').disabled = true; $('drop').classList.add('disabled');
   window.NearbyWorkspace.setConnected(false);
   $('peer-request').hidden = true; $('invitation').hidden = true; $('transport-label').textContent = 'Не подключено';

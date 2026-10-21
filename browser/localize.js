@@ -3,6 +3,9 @@
   const languages = ['en', 'hi', 'zh-CN', 'es'];
   const supported = ['ru', ...languages];
   const rows = [
+    ['Проверьте ID: нужны все 9 цифр.', 'Check the ID: enter all 9 digits.', 'ID जाँचें: सभी 9 अंक डालें।', '请检查 ID：输入完整的 9 位数字。', 'Comprueba el ID: introduce los 9 dígitos.'],
+    ['123-456-789 или ссылка', '123-456-789 or a link', '123-456-789 या लिंक', '123-456-789 或链接', '123-456-789 o enlace'],
+    ['Некорректный ключ устройства. Создайте новое приглашение.', 'Invalid device key. Create a new invitation.', 'डिवाइस की कुंजी सही नहीं है। नया आमंत्रण बनाएँ।', '设备密钥无效，请创建新邀请。', 'Clave de dispositivo no válida. Crea una invitación nueva.'],
     ['Подтверждать подключение по QR-коду или ссылке', 'Confirm connection from a QR code or link', 'QR कोड या लिंक से कनेक्शन की पुष्टि करें', '通过二维码或链接连接前确认', 'Confirmar la conexión desde un QR o enlace'],
     ['Восстанавливаем соединение', 'Reconnecting', 'फिर से कनेक्ट हो रहा है', '正在恢复连接', 'Reconectando'],
     ['Прямой канал недоступен. Переключаемся на зашифрованный интернет-канал.', 'Direct connection is unavailable. Switching to an encrypted internet channel.', 'सीधा कनेक्शन उपलब्ध नहीं है। एन्क्रिप्टेड इंटरनेट चैनल पर जा रहे हैं।', '直连不可用，正在切换到加密互联网通道。', 'La conexión directa no está disponible. Cambiando a un canal de internet cifrado.'],

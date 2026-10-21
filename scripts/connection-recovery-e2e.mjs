@@ -69,7 +69,10 @@ try {
     await host.goto(base); await host.locator('#create').click(); await host.locator('#share-link').waitFor();
     const invite = await host.locator('#share-link').inputValue();
     const roomId = new URLSearchParams(new URL(invite).hash.slice(1)).get('room');
-    await guest.goto(invite); await host.locator('#approve').click();
+    if (process.env.NEARBY_TEST_JOIN_BY_ID === '1') {
+      await guest.goto(base); await guest.locator('#invite-input').fill(await host.locator('#connection-id').textContent()); await guest.locator('#join-form button').click();
+    } else await guest.goto(invite);
+    await host.locator('#approve').click();
     for (const page of [host, guest]) await connected(page, 'WebRTC');
     // Let the established connection sit idle across several server polls.
     if (scenario === 'idle-host') {

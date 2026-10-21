@@ -5,6 +5,7 @@ ini_set('display_errors', '0');
 require_once __DIR__ . '/statistics.php';
 require_once __DIR__ . '/relay.php';
 require_once __DIR__ . '/automatic.php';
+require_once __DIR__ . '/short-id.php';
 // LAN signaling or bounded, opaque encrypted frames in the explicit internet mode.
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
@@ -88,8 +89,12 @@ try {
     if ($action === 'create') {
         $mode = $input['mode'] ?? 'lan';
         if (!in_array($mode, ['lan', 'internet', 'auto'], true)) fail(400, 'Некорректный режим соединения.');
+        $shortId = $input['shortId'] ?? false;
+        if (!is_bool($shortId)) fail(400, 'Некорректный ID приглашения.');
+        $publicKey = $shortId ? idPublicKey($input['idPublicKey'] ?? null) : null;
         $idLookup = $input['idLookup'] ?? null;
         $idInviteDigest = $input['idInviteDigest'] ?? null;
+        if ($shortId && ($idLookup !== null || $idInviteDigest !== null)) fail(400, 'Некорректный ID приглашения.');
         if ($idLookup !== null || $idInviteDigest !== null) {
             if (!is_string($idLookup) || !preg_match('/^[a-f0-9]{64}$/D', $idLookup) ||
                 !is_string($idInviteDigest) || !preg_match('/^[a-f0-9]{64}$/D', $idInviteDigest)) fail(400, 'Некорректный ID приглашения.');
@@ -115,11 +120,14 @@ try {
         }
         if ($active >= 200) { flock($global, LOCK_UN); fclose($global); fail(503, 'Сервис занят. Попробуйте позже.'); }
         if ($mode === 'internet' && $internetActive >= 20) fail(503, 'Интернет-режим сейчас занят. Попробуйте позже.');
-        $room = hexToken(16); $host = hexToken(); $invite = $idLookup === null ? hexToken() : null;
+        $room = hexToken(16); $host = hexToken(); $shortCode = null;
+        if ($shortId) { [$shortCode, $idLookup] = reserveShortId($base, $now); $invite = shortIdToken($base, $room); }
+        else $invite = $idLookup === null ? hexToken() : null;
         $state = ['host' => hash('sha256', $host), 'invite' => $idInviteDigest ?? hash('sha256', $invite), 'guest' => null,
             'hostName' => nameValue($input['name'] ?? ''), 'guestName' => null, 'approved' => false,
             'expires' => $now + ($mode === 'internet' ? 7200 : 900), 'created' => $now, 'seq' => 0, 'messages' => [], 'closed' => false, 'mode' => $mode];
         if ($idLookup !== null) { $state['idLookup'] = $idLookup; $state['inviteExpires'] = $now + 900; }
+        if ($shortId) { $state['idVersion'] = 2; $state['idPublicKey'] = $publicKey; }
         if ($mode === 'auto') $state['transport'] = 'probing';
         if ($mode === 'internet') {
             $empty = ['seq' => 0, 'ack' => 0, 'frames' => [], 'recent' => []];
@@ -130,9 +138,10 @@ try {
         chmod($base . '/room-' . $room . '.json', 0600); writeState($f, $state); fclose($f);
         flock($global, LOCK_UN); fclose($global);
         reply(201, ['room' => $room, 'token' => $host, 'invite' => $invite, 'expires' => $state['expires'], 'mode' => $mode,
-            'idEnabled' => $idLookup !== null, 'inviteExpires' => $state['inviteExpires'] ?? $state['expires']]);
+            'idEnabled' => $idLookup !== null, 'shortId' => $shortId, 'id' => $shortCode, 'inviteExpires' => $state['inviteExpires'] ?? $state['expires']]);
     }
     if ($action === 'resolve-id') {
+        idLookupBudget($base, $now);
         $lookup = $input['lookup'] ?? null;
         if (!is_string($lookup) || !preg_match('/^[a-f0-9]{64}$/D', $lookup)) fail(400, 'Некорректный ID приглашения.');
         // At most 200 rooms exist; no separate ID index or plaintext secret is stored.
@@ -144,8 +153,11 @@ try {
             flock($handle, LOCK_UN); fclose($handle);
             if (!is_array($candidateState) || !isset($candidateState['idLookup']) || !hash_equals($candidateState['idLookup'], $lookup)) continue;
             if (($candidateState['inviteExpires'] ?? 0) < $now || $candidateState['expires'] < $now ||
-                $candidateState['closed'] || $candidateState['guest'] !== null) break;
-            reply(200, ['room' => substr(basename($candidate), 5, 32), 'mode' => $candidateState['mode'] ?? 'lan', 'expires' => $candidateState['inviteExpires']]);
+                $candidateState['closed'] || $candidateState['guest'] !== null) continue;
+            $foundRoom = substr(basename($candidate), 5, 32);
+            $resolved = ['room' => $foundRoom, 'mode' => $candidateState['mode'] ?? 'lan', 'expires' => $candidateState['inviteExpires']];
+            if (($candidateState['idVersion'] ?? 1) === 2) { $resolved['token'] = shortIdToken($base, $foundRoom); $resolved['idPublicKey'] = $candidateState['idPublicKey']; }
+            reply(200, $resolved);
         }
         fail(404, 'ID не найден, истёк или уже использован. Создайте новое приглашение.');
     }
@@ -164,6 +176,10 @@ try {
         if (($state['inviteExpires'] ?? $state['expires']) < $now) fail(410, 'Срок приглашения истёк. Создайте новое подключение.');
         if (!hash_equals($state['invite'], $digest)) fail(403, 'Недействительное приглашение.');
         if ($state['guest'] !== null) fail(409, 'Приглашение уже использовано. Создайте новое.');
+        if (isset($input['idPublicKey'])) {
+            if (($state['idVersion'] ?? 1) !== 2) fail(400, 'Некорректный ключ устройства. Создайте новое приглашение.');
+            $state['guestPublicKey'] = idPublicKey($input['idPublicKey']);
+        }
         $guest = hexToken(); $state['guest'] = hash('sha256', $guest);
         $state['guestName'] = nameValue($input['name'] ?? '');
         writeState($f, $state); flock($f, LOCK_UN); fclose($f);
@@ -224,7 +240,7 @@ try {
     $messages = array_values(array_filter($state['messages'], fn($m) => $m['from'] !== $role && $m['id'] > $after));
     // Absolute lifetime; internet mode has a bounded, temporary ciphertext queue.
     writeState($f, $state); flock($f, LOCK_UN); fclose($f);
-    reply(200, ['approved' => $state['approved'], 'guestName' => $state['guestName'], 'hostName' => $state['hostName'], 'messages' => $messages, 'cursor' => $state['seq'], 'expires' => $state['expires'], 'transport' => $state['transport'] ?? null]);
+    reply(200, ['approved' => $state['approved'], 'guestName' => $state['guestName'], 'hostName' => $state['hostName'], 'messages' => $messages, 'cursor' => $state['seq'], 'expires' => $state['expires'], 'transport' => $state['transport'] ?? null, 'guestPublicKey' => $role === 'host' ? ($state['guestPublicKey'] ?? null) : null]);
 } catch (Throwable $e) {
     error_log('Nearby signaling: ' . get_class($e));
     fail(500, 'Не удалось обработать запрос. Попробуйте позже.');

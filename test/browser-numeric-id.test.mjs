@@ -1,0 +1,71 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { spawn, spawnSync } from 'node:child_process';
+import { mkdtemp, readFile, readdir, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import net from 'node:net';
+import { normalizeInvitationId, formatInvitationId, invitationCredentials, shortInvitationLookup, invitationKeyExchange, sharedInvitationSecret } from '../browser/invitation-id.mjs';
+test('nine-digit IDs preserve leading zeros and are separate from ECDH encryption keys', async () => {
+  assert.equal(normalizeInvitationId(' 001-234 567 '), '001234567');
+  assert.equal(formatInvitationId('001234567'), '001-234-567');
+  for (const value of ['12345678', '1234567890', '12345678O', '12345678I', '-1', 'https://example.com/123456789']) assert.throws(() => normalizeInvitationId(value));
+  await assert.rejects(invitationCredentials('123456789'));
+  assert.equal(await shortInvitationLookup('001 234-567'), createHash('sha256').update('nearby-short-id:v1:lookup:001234567').digest('hex'));
+  const host = await invitationKeyExchange(), guest = await invitationKeyExchange(), room = 'a'.repeat(32);
+  assert.equal(host.privateKey.extractable, false);
+  const secret = await sharedInvitationSecret(host.privateKey, guest.publicKey, room);
+  assert.equal(secret, await sharedInvitationSecret(guest.privateKey, host.publicKey, room)); assert.match(secret, /^[a-f0-9]{64}$/);
+  assert.notEqual(secret, await sharedInvitationSecret(host.privateKey, guest.publicKey, 'b'.repeat(32)));
+  assert.notEqual(secret, await shortInvitationLookup('001234567'));
+  await assert.rejects(sharedInvitationSecret(host.privateKey, '04' + '0'.repeat(128), room));
+});
+const php = process.env.PHP_PATH || 'php';
+test('numeric ID API uses random capabilities, reservations, approval, single-use expiry and global lookup limits', { skip: spawnSync(php, ['-v'], { windowsHide: true }).status !== 0 }, async () => {
+  const state = await mkdtemp(path.join(tmpdir(), 'nearby-numeric-id-'));
+  const port = await new Promise(resolve => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); });
+  const proc = spawn(php, ['-S', `127.0.0.1:${port}`, '-t', 'browser'], { env: { ...process.env, NEARBY_WEB_STATE_DIR: state }, windowsHide: true, stdio: 'ignore' });
+  const request = async (body, expected = 200) => { const response = await fetch(`http://127.0.0.1:${port}/api.php`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); const result = await response.json(); assert.equal(response.status, expected, JSON.stringify(result)); return result; };
+  try {
+    for (let i = 0; i < 50; i++) { try { await fetch(`http://127.0.0.1:${port}`); break; } catch { await new Promise(resolve => setTimeout(resolve, 100)); } }
+    const host = await invitationKeyExchange(), guest = await invitationKeyExchange();
+    await request({ action: 'create', shortId: true, idPublicKey: 'bad' }, 400);
+    await request({ action: 'create', shortId: true, idPublicKey: host.publicKey, idLookup: 'a'.repeat(64) }, 400);
+    const created = await request({ action: 'create', mode: 'auto', shortId: true, idPublicKey: host.publicKey }, 201);
+    assert.equal(created.shortId, true); assert.match(created.id, /^\d{9}$/); assert.match(created.invite, /^[a-f0-9]{64}$/);
+    const lookup = await shortInvitationLookup(created.id), roomPath = path.join(state, `room-${created.room}.json`), auth = { room: created.room, token: created.token };
+    const raw = await readFile(roomPath, 'utf8'); assert.ok(!raw.includes(created.id)); assert.ok(!raw.includes(created.invite));
+    assert.ok(JSON.parse(await readFile(path.join(state, 'short-id-reservations.json'), 'utf8'))[lookup] >= Math.floor(Date.now() / 1000));
+    // An older expired room with the same reused code must not shadow a live ID.
+    const stale = JSON.parse(raw); stale.inviteExpires = 1; await writeFile(path.join(state, 'room-' + '0'.repeat(32) + '.json'), JSON.stringify(stale));
+    const found = await request({ action: 'resolve-id', lookup }); assert.equal(found.token, created.invite); assert.equal(found.idPublicKey, host.publicKey); assert.equal(found.room, created.room);
+    await request({ action: 'join', room: created.room, token: found.token, idPublicKey: 'bad' }, 400);
+    const joined = await request({ action: 'join', room: created.room, token: found.token, idPublicKey: guest.publicKey });
+    const guestAuth = { room: created.room, token: joined.token };
+    await request({ action: 'record-usage', ...guestAuth }, 403);
+    const waiting = await request({ action: 'poll', ...auth }); assert.equal(waiting.approved, false); assert.equal(waiting.guestPublicKey, guest.publicKey);
+    assert.equal((await request({ action: 'poll', ...guestAuth })).guestPublicKey, null);
+    await request({ action: 'approve', ...guestAuth }, 403);
+    await request({ action: 'approve', ...auth });
+    await request({ action: 'resolve-id', lookup }, 404);
+    await request({ action: 'join', room: created.room, token: found.token, idPublicKey: guest.publicKey }, 409);
+    assert.equal(await sharedInvitationSecret(host.privateKey, waiting.guestPublicKey, created.room), await sharedInvitationSecret(guest.privateKey, found.idPublicKey, created.room));
+    const another = await request({ action: 'create', mode: 'internet', shortId: true, idPublicKey: host.publicKey }, 201);
+    assert.notEqual(another.id, created.id); assert.notEqual(another.invite, created.invite);
+    const anotherPath = path.join(state, `room-${another.room}.json`), expired = JSON.parse(await readFile(anotherPath, 'utf8'));
+    expired.inviteExpires = 1; await writeFile(anotherPath, JSON.stringify(expired));
+    await request({ action: 'resolve-id', lookup: await shortInvitationLookup(another.id) }, 404);
+    await request({ action: 'join', room: another.room, token: another.invite }, 410);
+    for (const file of await readdir(state)) if (file.startsWith('budget-')) await rm(path.join(state, file));
+    await writeFile(path.join(state, 'id-lookup-budget.json'), JSON.stringify({ window: Math.floor(Date.now() / 1000), requests: 119 }));
+    await request({ action: 'resolve-id', lookup: 'f'.repeat(64) }, 404);
+    await request({ action: 'resolve-id', lookup: 'f'.repeat(64) }, 429);
+    assert.equal((await request({ action: 'poll', ...auth })).approved, true);
+    await writeFile(path.join(state, 'id-lookup-budget.json'), '{broken');
+    await request({ action: 'resolve-id', lookup: 'f'.repeat(64) }, 500);
+    const reservationsPath = path.join(state, 'short-id-reservations.json'); await writeFile(reservationsPath, '{broken');
+    await request({ action: 'create', shortId: true, idPublicKey: host.publicKey }, 500);
+    assert.equal(await readFile(reservationsPath, 'utf8'), '{broken', 'corrupt reservations are not reset and reused');
+  } finally { proc.kill(); await new Promise(resolve => proc.once('exit', resolve)); await rm(state, { recursive: true, force: true }); }
+});

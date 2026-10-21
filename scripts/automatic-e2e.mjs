@@ -41,9 +41,10 @@ try {
     assert.equal(await host.locator('#connection-settings').getAttribute('open'), null);
     await host.locator('#create').click(); await host.locator('#share-link').waitFor();
     const invite = await host.locator('#share-link').inputValue();
+    assert.match(await host.locator('#connection-id').textContent(), /^\d{3}-\d{3}-\d{3}$/);
     const params = new URLSearchParams(new URL(invite).hash.slice(1));
     assert.equal(params.get('mode'), 'auto'); const secret = params.get('secret'); assert.equal(secret.length, 64);
-    if (scenario === 'guest-without-rtc') {
+    if (scenario === 'guest-without-rtc' || process.env.NEARBY_TEST_JOIN_BY_ID === '1') {
       await guest.goto(base); await guest.locator('#invite-input').fill(await host.locator('#connection-id').textContent()); await guest.locator('#join-form button').click();
     } else { await guest.goto(invite); }
     await host.locator('#approve').waitFor(); assert.ok(await host.locator('#files').isDisabled());
