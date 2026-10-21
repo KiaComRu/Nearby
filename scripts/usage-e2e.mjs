@@ -19,7 +19,7 @@ try {
   await until(async()=>{try{return(await fetch(origin)).ok;}catch{return false;}});
   browser=await chromium.launch({headless:true});
   const first=await browser.newContext({viewport:{width:1280,height:900}}), second=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
-  for(const context of [first,second])await context.addInitScript(()=>{localStorage.setItem('nearby-site-language','ru');window.RTCPeerConnection=undefined;});
+  for(const context of [first,second])await context.addInitScript(()=>{localStorage.setItem('nearby-site-language','ru');localStorage.setItem('nearby.confirm-invitation','true');window.RTCPeerConnection=undefined;});
   native=await createApp({host:'127.0.0.1',port:0,storage:path.join(directory,'native'),statistics:{endpoint:web+'api.php'},trustedLan:false,discovery:false});
   const nativeOrigin=`http://127.0.0.1:${native.port}`;
   async function pinConnect(){const response=await fetch(nativeOrigin+'/api/join',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin:native.pin,device:'Same phone'})});const {token}=await response.json();for(let i=0;i<5;i++)assert.equal((await fetch(nativeOrigin+'/api/state',{headers:{Authorization:`Bearer ${token}`}})).status,200);return token;}
@@ -30,7 +30,7 @@ try {
     await host.locator('#share-link').waitFor();await guest.goto(await host.locator('#share-link').inputValue());await guest.locator('#device-name').fill('Same phone');await guest.locator('#join-invite').click();
     await host.locator('#approve').waitFor();assert.equal((await stats()).uses,count-1);
     await host.locator('#approve').click();for(const page of [host,guest])await page.waitForFunction(()=>!document.querySelector('#files').disabled);
-    await until(async()=>(await stats()).uses===count);await host.locator('#disconnect').click();await host.close();await guest.close();
+    await until(async()=>(await stats()).uses===count);await host.locator('#tab-connection').click();await host.locator('#disconnect').click();await host.close();await guest.close();
   }
   await pinConnect();await until(async()=>(await stats()).uses===4);
   await mkdir('artifacts',{recursive:true});

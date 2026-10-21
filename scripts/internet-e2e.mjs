@@ -20,7 +20,7 @@ try {
   const contexts = await Promise.all([browser.newContext({ acceptDownloads: true }), browser.newContext({ acceptDownloads: true, viewport: { width: 390, height: 844 }, isMobile: true, userAgent: 'Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 Chrome/140.0.0.0 Mobile Safari/537.36' })]);
   // Only the website HTTP origin is reachable; no RTC transport or peer LAN endpoints.
   for (const context of contexts) {
-    await context.addInitScript(() => { window.RTCPeerConnection = undefined; window.showSaveFilePicker = undefined; });
+    await context.addInitScript(() => { localStorage.setItem('nearby-site-language', 'ru'); window.RTCPeerConnection = undefined; window.showSaveFilePicker = undefined; });
     await context.route('**/*', route => new URL(route.request().url()).origin === new URL(target).origin ? route.continue() : route.abort());
     context.on('request', request => { if (request.method() === 'POST') requests.push(request.postData()); });
   }
@@ -31,7 +31,7 @@ try {
   await host.locator('#create').click(); await host.locator('#share-link').waitFor();
   const invite = await host.locator('#share-link').inputValue();
   const secret = new URLSearchParams(new URL(invite).hash.slice(1)).get('secret'); assert.equal(secret.length, 64);
-  await guest.goto(invite); await guest.locator('#join-invite').click();
+  await guest.goto(invite);
   await host.locator('#approve').waitFor(); assert.equal(await host.locator('#files').isDisabled(), true);
   await host.locator('#approve').click();
   for (const page of [host, guest]) await page.waitForFunction(() => !document.querySelector('#files').disabled, null, { timeout: 60000 });
@@ -39,11 +39,10 @@ try {
   let count = 0, size = 0;
   async function transfer(from, to, name, bytes) {
     await from.waitForFunction(() => !document.querySelector('#files').disabled);
+    const downloading = to.waitForEvent('download');
     await from.locator('#files').setInputFiles({ name, mimeType: 'application/octet-stream', buffer: bytes });
     const card = to.locator('.transfer').filter({ has: to.getByText(name, { exact: true }) });
-    await card.getByRole('button', { name: 'Принять', exact: true }).click();
-    await card.getByText('Файл принят. Нажмите «Сохранить файл».', { exact: true }).waitFor({ timeout: 60000 });
-    const downloading = to.waitForEvent('download'); await card.getByRole('link', { name: 'Сохранить файл' }).click();
+    await card.getByText('Файл принят. Загрузка началась автоматически.', { exact: true }).waitFor({ timeout: 60000 });
     const download = await downloading; assert.equal(download.suggestedFilename(), name);
     assert.equal(hash(await readFile(await download.path())), hash(bytes));
     count++; size += bytes.length;
@@ -54,10 +53,6 @@ try {
   await transfer(host, guest, 'private-to-phone.bin', randomBytes(1024 * 1024 + 31));
   await transfer(guest, host, 'private-to-pc.bin', randomBytes(1024 * 1024 + 7));
   await transfer(host, guest, 'private-empty.txt', Buffer.alloc(0));
-  await host.locator('#files').setInputFiles({ name: 'private-refused.txt', mimeType: 'text/plain', buffer: Buffer.from('do not receive') });
-  await guest.locator('.transfer').filter({ hasText: 'private-refused.txt' }).getByRole('button', { name: 'Отклонить' }).click();
-  await host.getByText('Передача отклонена или отменена другим устройством.', { exact: true }).first().waitFor();
-  await host.waitForFunction(() => !document.querySelector('#files').disabled);
   await host.evaluate(() => { const files = new DataTransfer(); files.items.add(new File([new ArrayBuffer(100 * 1024 ** 2 + 1)], 'private-too-large.bin')); const input = document.querySelector('#files'); input.files = files.files; input.dispatchEvent(new Event('change', { bubbles: true })); });
   await host.locator('#notice').filter({ hasText: 'Недопустимое имя или размер файла' }).waitFor();
   assert.equal(await guest.getByText('private-too-large.bin', { exact: true }).count(), 0);
@@ -69,9 +64,9 @@ try {
   await mkdir('artifacts', { recursive: true });
   await host.screenshot({ path: 'artifacts/nearby-internet-desktop.png', fullPage: true });
   await guest.screenshot({ path: 'artifacts/nearby-internet-mobile.png', fullPage: true });
-  await guest.locator('#disconnect').click(); await host.locator('#disconnect').filter({ hasText: 'Новое подключение' }).waitFor({ timeout: 10000 });
+  await guest.locator('#tab-connection').click(); await host.locator('#tab-connection').click(); await guest.locator('#disconnect').click(); await host.locator('#disconnect').filter({ hasText: 'Новое подключение' }).waitFor({ timeout: 10000 });
   assert.deepEqual(errors, []);
   const report = { passed: true, rtcDisabled: true, websiteOriginOnly: true, files: count, bytes: size, encryptedRequests: true, statisticsVerified: true, limitMiB: 100, testedAt: new Date().toISOString() };
   await writeFile('artifacts/Nearby-internet-verification.json', JSON.stringify(report, null, 2));
-  console.log('Internet E2E passed: HTTP-only pairing, both directions, binary hashes, empty file, refusal, size limit, ciphertext privacy, statistics, disconnect.');
+  console.log('Internet E2E passed: HTTP-only pairing, both directions, binary hashes, empty file, automatic reception, size limit, ciphertext privacy, statistics, disconnect.');
 } finally { await browser?.close(); server.kill(); await new Promise(r => server.once('exit', r)); await rm(state, { recursive: true, force: true }); }

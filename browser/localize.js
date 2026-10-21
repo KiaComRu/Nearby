@@ -3,6 +3,7 @@
   const languages = ['en', 'hi', 'zh-CN', 'es'];
   const supported = ['ru', ...languages];
   const rows = [
+    ['Подтверждать подключение по QR-коду или ссылке', 'Confirm connection from a QR code or link', 'QR कोड या लिंक से कनेक्शन की पुष्टि करें', '通过二维码或链接连接前确认', 'Confirmar la conexión desde un QR o enlace'],
     ['Восстанавливаем соединение', 'Reconnecting', 'फिर से कनेक्ट हो रहा है', '正在恢复连接', 'Reconectando'],
     ['Прямой канал недоступен. Переключаемся на зашифрованный интернет-канал.', 'Direct connection is unavailable. Switching to an encrypted internet channel.', 'सीधा कनेक्शन उपलब्ध नहीं है। एन्क्रिप्टेड इंटरनेट चैनल पर जा रहे हैं।', '直连不可用，正在切换到加密互联网通道。', 'La conexión directa no está disponible. Cambiando a un canal de internet cifrado.'],
     ['Проверяем соединение с другим устройством…', 'Checking the connection to the other device…', 'दूसरे डिवाइस से कनेक्शन जाँचा जा रहा है…', '正在检查与另一台设备的连接…', 'Comprobando la conexión con el otro dispositivo…'],

@@ -45,7 +45,7 @@ try {
     assert.equal(params.get('mode'), 'auto'); const secret = params.get('secret'); assert.equal(secret.length, 64);
     if (scenario === 'guest-without-rtc') {
       await guest.goto(base); await guest.locator('#invite-input').fill(await host.locator('#connection-id').textContent()); await guest.locator('#join-form button').click();
-    } else { await guest.goto(invite); await guest.locator('#join-invite').click(); }
+    } else { await guest.goto(invite); }
     await host.locator('#approve').waitFor(); assert.ok(await host.locator('#files').isDisabled());
     const approvedAt = Date.now(); await host.locator('#approve').click();
     for (const page of [host, guest]) await page.waitForFunction(() => !document.querySelector('#files').disabled, null, { timeout: 60000 });

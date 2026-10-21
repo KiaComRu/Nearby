@@ -15,6 +15,17 @@ let bufferedBytes = 0;
 let relayChannel = null;
 let transport = null, probeChannel = null, activeChannel = null, connectionReady = false;
 let disconnectTimer, polling = false, directBroken = false, recoveryRequest = false;
+let joining = false;
+const confirmationStorageKey = 'nearby.confirm-invitation';
+let confirmInvitation = false;
+try { confirmInvitation = localStorage.getItem(confirmationStorageKey) === 'true'; } catch { /* Automatic joining works without storage. */ }
+const confirmationControl = $('confirm-invitation');
+if (confirmationControl) confirmationControl.checked = confirmInvitation;
+confirmationControl?.addEventListener('change', () => {
+  confirmInvitation = confirmationControl.checked;
+  try { localStorage.setItem(confirmationStorageKey, String(confirmInvitation)); } catch { /* Apply to this page only. */ }
+  if (!confirmInvitation && joinInvite) void join(joinInvite);
+});
 let peerDisplayName = '';
 const sizes = n => n < 1024 ? `${n} Б` : n < 1024 ** 2 ? `${(n / 1024).toFixed(1)} КиБ` : n < 1024 ** 3 ? `${(n / 1024 ** 2).toFixed(1)} МиБ` : `${(n / 1024 ** 3).toFixed(1)} ГиБ`;
 function notice(text, error = false) { $('notice').textContent = text; $('notice').classList.toggle('error', error); $('notice').hidden = !text; }
@@ -119,6 +130,8 @@ async function create() {
   } catch (error) { notice(error.message, true); $('create').disabled = false; }
 }
 async function join(value) {
+  if (joining || session || stopped) return;
+  joining = true;
   $('join-invite').disabled = true; $('join-form').querySelector('button').disabled = true;
   try {
     let invite;
@@ -137,7 +150,8 @@ async function join(value) {
     $('invitation').hidden = true; showSession();
     status('Ожидаем подтверждения', `${result.hostName}: подтвердите подключение на первом устройстве.`);
     poll();
-  } catch (error) { notice(error.message, true); $('join-invite').disabled = false; $('join-form').querySelector('button').disabled = false; }
+  } catch (error) { notice(error.message, true); $('join-invite').hidden = !joinInvite; $('join-invite').disabled = false; $('join-form').querySelector('button').disabled = false; }
+  finally { joining = false; }
 }
 function sendSignal(message) {
   signalChain = signalChain.then(() => api('signal', { message }));
@@ -453,6 +467,13 @@ if (['lan', 'internet', 'auto'].includes(initialParams.get('mode'))) $('connecti
 describeMode();
 if (!window.isSecureContext || !crypto.subtle) { notice('Откройте Nearby по HTTPS в современном браузере. На Windows рекомендуем Chrome или Edge.', true); $('create').disabled = true; $('join-form').hidden = true; }
 else if (initialParams.has('room')) {
-  try { const invite = parseInvite(location.href); $('connection-mode').value = invite.mode; describeMode(); joinInvite = location.href; history.replaceState(null, '', location.pathname); $('create').hidden = true; $('join-form').hidden = true; document.querySelector('.divider').hidden = true; $('join-invite').hidden = false; $('start').querySelector('h2').textContent = 'Вас пригласили в Nearby'; }
+  try {
+    const invite = parseInvite(location.href);
+    $('connection-mode').value = invite.mode; describeMode();
+    joinInvite = location.href; history.replaceState(null, '', location.pathname);
+    $('create').hidden = true; $('join-form').hidden = true; document.querySelector('.divider').hidden = true;
+    $('join-invite').hidden = !confirmInvitation; $('start').querySelector('h2').textContent = 'Вас пригласили в Nearby';
+    if (!confirmInvitation) void join(joinInvite);
+  }
   catch (error) { notice(error.message, true); history.replaceState(null, '', location.pathname); }
 } else if (location.hash) history.replaceState(null, '', location.pathname);
