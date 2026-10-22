@@ -4,6 +4,9 @@ import { normalizeInvitationId, formatInvitationId, invitationCredentials, short
 import { Connection, requestApi } from './connection.mjs?v=devices-1';
 const $ = id => document.getElementById(id);
 const mobileDevice = navigator.userAgentData?.mobile === true || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (/Mac/i.test(navigator.platform || '') && navigator.maxTouchPoints > 1);
+// iOS can navigate away from the receiving page to preview a Blob download.
+// Keep received files in the list until the user chooses to open/save them.
+const appleMobile = /iPhone|iPad|iPod/i.test(navigator.userAgent) || (/Mac/i.test(navigator.platform || '') && navigator.maxTouchPoints > 1);
 const diskSupported = !mobileDevice && typeof window.showDirectoryPicker === 'function';
 const connections = new Map(), rows = new Map(), objectUrls = new Set();
 let receiveDirectory = null, bufferedBytes = 0, selectedId = null, selectionLost = false, everConnected = false;
@@ -317,11 +320,13 @@ for (const control of document.querySelectorAll('[data-choose-folder]')) {
 function complete(connection, id, direction, blob) {
   const row = rows.get(rowKey(connection, id)); if (!row || row.done) return;
   row.done = true; row.progress.remove(); resetActions(row); deleteButton(row);
-  row.detail.textContent = direction === 'sent' ? 'Передан получателю.' : blob ? 'Файл принят. Загрузка началась автоматически.' : 'Сохранён в выбранную папку.';
+  row.detail.textContent = direction === 'sent' ? 'Передан получателю.' : blob ? appleMobile ? 'Файл принят. Откройте его из списка, чтобы сохранить.' : 'Файл принят. Загрузка началась автоматически.' : 'Сохранён в выбранную папку.';
   if (direction === 'received') void connection.reportStatistics('record-transfer', { id, size: row.size });
   if (blob) {
     fileActions(row, blob);
-    const save = document.createElement('a'); save.href = row.url; save.download = row.name; save.click();
+    if (!appleMobile) {
+      const save = document.createElement('a'); save.href = row.url; save.download = row.name; save.click();
+    }
   } else if (row.sourceFile) {
     fileActions(row, row.sourceFile); row.sourceFile = null;
   } else if (row.fileHandle) {
@@ -371,7 +376,10 @@ $('files').onchange = event => void sendFiles(Array.from(event.target.files));
 for (const type of ['dragover', 'dragleave', 'drop']) $('drop').addEventListener(type, event => { event.preventDefault(); $('drop').classList.toggle('drag', type === 'dragover' && !sending); if (type === 'drop') void sendFiles(Array.from(event.dataTransfer.files)); });
 document.addEventListener('dragover', event => event.preventDefault()); document.addEventListener('drop', event => event.preventDefault());
 window.addEventListener('beforeunload', event => { if (sending || Array.from(rows.values()).some(row => !row.done)) { event.preventDefault(); event.returnValue = ''; } });
-window.addEventListener('pagehide', () => {
+window.addEventListener('pagehide', event => {
+  // A page preserved by Safari's back/forward cache is suspended, not closed.
+  // Its connections and Blob URLs must still be usable when it is shown again.
+  if (event.persisted) return;
   appClosed = true; clearTimeout(idExpiryTimer);
   for (const connection of connections.values()) connection.stop('Соединение закрыто.', true);
   for (const row of rows.values()) row.preview.dispose();
@@ -381,7 +389,7 @@ window.addEventListener('hashchange', () => {
   if (setup || creating || joining || appClosed) return;
   if (new URLSearchParams(location.hash.slice(1)).has('room')) openInvitation(location.href);
 });
-$('save-hint').textContent = diskSupported ? 'Приём автоматический. Можно один раз выбрать папку получения.' : 'Приём автоматический · до 100 МиБ. Сохраните файлы перед закрытием.';
+$('save-hint').textContent = diskSupported ? 'Приём автоматический. Можно один раз выбрать папку получения.' : appleMobile ? 'Приём автоматический · до 100 МиБ. Откройте файл в списке, чтобы сохранить.' : 'Приём автоматический · до 100 МиБ. Сохраните файлы перед закрытием.';
 function describeMode() {
   const internet = $('connection-mode').value === 'internet', automatic = $('connection-mode').value === 'auto';
   $('mode-help').textContent = automatic ? 'Соединение выбирается автоматически: напрямую, а если недоступно — через зашифрованный интернет-канал (до 100 МиБ на файл).' : internet ? 'Для разных Wi-Fi и мобильного интернета. До 100 МиБ на файл; оба устройства остаются онлайн. Зашифрованные части временно проходят через сервер.' : 'Для устройств в одной доступной локальной сети. Файлы идут напрямую через WebRTC.';

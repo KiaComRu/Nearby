@@ -3,6 +3,9 @@
   const languages = ['en', 'hi', 'zh-CN', 'es'];
   const supported = ['ru', ...languages];
   const rows = [
+    ['Файлы принимаются автоматически после подключения.','Files are received automatically after connection.','कनेक्शन के बाद फ़ाइलें अपने आप प्राप्त होती हैं।','连接后自动接收文件。','Los archivos se reciben automáticamente tras conectar.'],
+    ['Файл принят. Откройте его из списка, чтобы сохранить.','File received. Open it from the list to save it.','फ़ाइल मिल गई। सहेजने के लिए इसे सूची से खोलें।','文件已接收。请从列表中打开并保存。','Archivo recibido. Ábrelo desde la lista para guardarlo.'],
+    ['Приём автоматический · до 100 МиБ. Откройте файл в списке, чтобы сохранить.','Automatic receiving · up to 100 MiB. Open a file from the list to save it.','अपने आप प्राप्त करें · 100 MiB तक। सहेजने के लिए सूची से फ़ाइल खोलें।','自动接收 · 每个文件最多 100 MiB。请从列表中打开并保存文件。','Recepción automática · hasta 100 MiB. Abre el archivo desde la lista para guardarlo.'],
     ['Отправить файл','Send file','फ़ाइल भेजें','发送文件','Enviar archivo'],
     ['Принятые файлы','Received files','मिली हुई फ़ाइलें','已接收文件','Archivos recibidos'],
     ['Настройки','Settings','सेटिंग','设置','Ajustes'],
