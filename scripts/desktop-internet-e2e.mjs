@@ -42,7 +42,7 @@ try {
     const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));await page.goto(app.adminUrl);await page.locator('#workspace').waitFor();pages.push(page);
   }
   const [a,b]=pages;
-  async function internet(page,name){await page.locator('#tab-connection').click();await page.locator('#connection-settings').evaluate(el=>el.open=true);await page.locator('#connection-mode').selectOption('internet');await page.locator('#internet-name').fill(name);}
+  async function internet(page,name){await page.locator('#tab-connection').click();await page.locator('#open-settings').click();await page.locator('#connection-mode').selectOption('internet');await page.locator('#connection-settings [data-close-settings]').last().click();await page.locator('#internet-name').fill(name);}
   assert.ok(await a.locator('#internet-shortcuts').isVisible());assert.equal(await a.locator('#connection-settings').evaluate(el=>el.open),false);
   assert.match(await a.locator('#connection').innerText(),/только в общей сети ПК/);
   await a.screenshot({path:'artifacts/invitation-access-main.png'});
@@ -78,6 +78,7 @@ try {
   await internet(a,'Internet PC A');await a.locator('#internet-create').click();await a.locator('#internet-invitation').waitFor();const invite=await a.locator('#internet-link').inputValue();
   await phone.goto(invite);try{await a.locator('#internet-approve').waitFor();}catch(error){console.log('PHONE DEBUG',await phone.locator('body').innerText(),errors);throw error;}await a.locator('#internet-approve').click();await phone.waitForFunction(()=>!document.querySelector('#files').disabled,null,{timeout:60000});
   await a.locator('#tab-devices').waitFor();assert.equal(await a.locator('.device-target').count(),2);
+  await a.locator('#tab-devices').click();await a.locator('#open-settings').click();assert.ok(await a.locator('#connection-settings').evaluate(dialog=>dialog.matches(':modal')));await a.screenshot({path:'artifacts/settings-modal-devices'+(nativePage?'-native':'')+'.png'});await a.keyboard.press('Escape');assert.equal(await a.locator('[role=tab][aria-selected=true]').getAttribute('id'),'tab-devices');
   // The original PC remains selected when another device connects.
   assert.equal(await a.locator('#recipient-name').textContent(),'Internet PC B');
   await phone.locator('#files').setInputFiles({name:'private-from-phone.txt',mimeType:'text/plain',buffer:Buffer.from('phone via encrypted relay')});

@@ -69,21 +69,24 @@
 
 
 
-    <nav class="workspace-tabs" role="tablist" aria-label="Работа с устройствами">
+    <div class="workspace-bar"><nav class="workspace-tabs" role="tablist" aria-label="Работа с устройствами">
 <button id="tab-connection" type="button" data-pane="connection" role="tab" aria-controls="connection-pane" aria-selected="true">Подключение</button>
 <button id="tab-devices" type="button" hidden disabled data-pane="devices" role="tab" aria-controls="devices-pane" aria-selected="false">Устройства</button>
 <button id="tab-transfer" type="button" disabled="" data-pane="transfer" role="tab" aria-controls="transfer-pane" aria-selected="false">Передача</button>
-</nav>
-<div class="tab-panels">
-<section id="connection-pane" class="tab-panel" role="tabpanel" aria-labelledby="tab-connection">
-<details class="connection-settings" id="connection-settings"><summary>Дополнительные настройки</summary>
+</nav><button id="open-settings" class="settings-button secondary" type="button" aria-label="Дополнительные настройки" title="Дополнительные настройки" aria-haspopup="dialog" aria-controls="connection-settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 3-.6 2.2-1.8 1L4.4 6 2.9 8.6l1.6 1.7v2L2.9 14l1.5 2.6 2.2-.2 1.8 1L9 20h3l.6-2.6 1.8-1 2.2.2 1.5-2.6-1.6-1.7v-2l1.6-1.7L16.6 6l-2.2.2-1.8-1L12 3Z" transform="translate(1.5 .5)"/><circle cx="12" cy="12" r="3"/></svg></button></div>
+<dialog id="connection-settings" class="settings-dialog" aria-labelledby="settings-heading">
+<div class="settings-heading"><h2 id="settings-heading">Дополнительные настройки</h2><button type="button" class="secondary settings-close" data-close-settings aria-label="Закрыть настройки" title="Закрыть настройки"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+<div class="settings-content">
 <label for="connection-mode">Способ подключения</label>
 <select id="connection-mode">
 <option value="lan">Локальная сеть</option>
 <option value="internet">Интернет</option>
 </select>
 <p>Локальная сеть — для устройств рядом. Интернет — для разных Wi-Fi и мобильных сетей.</p><label class="invitation-confirmation"><input id="confirm-invitation" type="checkbox"> Подтверждать подключение по QR-коду или ссылке</label>
-</details>
+</div><div class="settings-footer"><button type="button" data-close-settings>Готово</button></div>
+</dialog>
+<div class="tab-panels">
+<section id="connection-pane" class="tab-panel" role="tabpanel" aria-labelledby="tab-connection">
 <div id="internet-shortcuts" class="internet-shortcuts" hidden><p>Устройства в разных сетях?</p><button id="invite-internet" type="button">Пригласить через интернет</button><button id="open-internet" type="button" class="secondary">Подключиться по интернет-ID</button></div>
 <div id="desktop-lan" class="desktop-lan">
 <section id="join" class="panel" hidden="">

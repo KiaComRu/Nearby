@@ -1,6 +1,17 @@
 (() => {
   'use strict';
   const tabs = [...document.querySelectorAll('[role="tab"][data-pane]')];
+  const settings = document.getElementById('connection-settings'), settingsButton = document.getElementById('open-settings');
+  if (settings?.tagName === 'DIALOG' && settingsButton) {
+    settingsButton.addEventListener('click', () => { if (!settings.open) settings.showModal(); });
+    for (const button of settings.querySelectorAll('[data-close-settings]')) button.addEventListener('click', () => settings.close());
+    settings.addEventListener('click', event => {
+      if (event.target !== settings) return;
+      const box = settings.getBoundingClientRect();
+      if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) settings.close();
+    });
+    settings.addEventListener('close', () => settingsButton.focus({ preventScroll: true }));
+  }
   let connected = false, hadConnection = false;
   function selectTab(name, focus = false) {
     const selected = tabs.find(tab => tab.dataset.pane === name);

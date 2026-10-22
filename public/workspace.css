@@ -111,7 +111,6 @@ body.compact-app{height:100vh;height:100dvh;min-height:0;display:flex;flex-direc
   .native-app #stats-state {grid-area:state;position:static;max-width:none;margin:0;font-size:9px;line-height:1.35;white-space:normal;overflow:visible;text-align:right}
 }
 
-.native-app #connection-settings{align-self:center;min-width:0;font-size:12px}.native-app #connection-settings summary{cursor:pointer;color:var(--muted)}.native-app #connection-settings[open]{align-self:start}.native-app #connection-settings select{width:100%;max-width:100%}
 .native-app .invitation-confirmation{display:flex;align-items:flex-start;gap:8px;line-height:1.4;margin-top:10px}.native-app #confirm-invitation{width:16px;height:16px;min-height:0;flex:0 0 16px;padding:0;margin:1px 0 0;accent-color:var(--cyan)}
 
 .native-app:not([data-active-pane="connection"]) #transfer-statistics{display:none}
@@ -147,7 +146,7 @@ body.compact-app{height:100vh;height:100dvh;min-height:0;display:flex;flex-direc
 .native-app .transfer-table .remove-transfer{padding:2px;min-height:30px;min-width:30px;font-size:21px;background:transparent;color:var(--muted);border-color:transparent}
 .native-app .transfer-table .remove-transfer:hover{color:var(--ink);background:#ffffff10}.native-app .transfer-table .error .transfer-detail{color:#ffb4c4}
 
-.native-app #connection-settings{display:block;flex-shrink:0;font-size:12px}.native-app #connection-settings summary{cursor:pointer;color:var(--muted)}.native-app #connection-settings[open]{overflow:auto;max-height:170px}.native-app #connection-settings select{width:auto;margin:8px}.native-app #confirm-invitation{width:16px;min-height:0;vertical-align:middle}.native-app #transfer-workspace{display:flex;flex-direction:column;min-height:0;flex:1;gap:10px}.native-app .transfer-table .file-row{display:table-row}.native-app .transfer-table .file-name{font-size:12px;white-space:normal;overflow-wrap:anywhere}.native-app .transfer-table .file-meta{font-size:11px}.native-app .recipient-bar{flex-shrink:0}
+.native-app #confirm-invitation{width:16px;min-height:0;vertical-align:middle}.native-app #transfer-workspace{display:flex;flex-direction:column;min-height:0;flex:1;gap:10px}.native-app .transfer-table .file-row{display:table-row}.native-app .transfer-table .file-name{font-size:12px;white-space:normal;overflow-wrap:anywhere}.native-app .transfer-table .file-meta{font-size:11px}.native-app .recipient-bar{flex-shrink:0}
 
 .native-app{--cyan:var(--green);--panel:#fff}.native-app .device-target:has(input:checked){background:#edf4e7}
 .native-app #internet-option{overflow:auto;flex:1;padding:16px}
@@ -168,3 +167,13 @@ body.compact-app{height:100vh;height:100dvh;min-height:0;display:flex;flex-direc
 .native-app .internet-connected{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--line)}
 .native-app #internet-approval{border:1px solid var(--line);border-radius:10px;padding:12px;margin:8px 0}
 @media(max-width:550px){.native-app .internet-actions{grid-template-columns:1fr}.native-app #internet-invitation{grid-template-columns:1fr}.native-app #internet-qr{grid-row:auto}.native-app #internet-code{font-size:22px}}
+
+.native-app .workspace-bar{display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--line);padding-bottom:7px;flex-shrink:0}
+.native-app .workspace-bar .workspace-tabs{flex:1;min-width:0;border-bottom:0;padding-bottom:0}
+.native-app .workspace-bar .settings-button{margin-left:auto;flex:0 0 36px;display:grid;place-items:center;width:36px;height:36px;min-width:36px;padding:7px;border:1px solid var(--line);border-radius:9px;color:var(--green);background:#edf2e9}
+.native-app .settings-button:hover{background:#dae5d4}.native-app .settings-button svg,.native-app .settings-close svg{width:21px;height:21px;display:block}
+.native-app .settings-dialog{box-sizing:border-box;width:min(520px,calc(100vw - 32px));max-height:calc(100dvh - 32px);margin:auto;padding:22px;border:1px solid var(--line);border-radius:16px;background:var(--panel,#fff);color:var(--ink);box-shadow:0 18px 70px #10291f33;overflow:auto}
+.native-app .settings-dialog::backdrop{background:#0a2118a6;backdrop-filter:blur(3px)}
+.native-app .settings-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:20px}.native-app .settings-heading h2{margin:0;font-size:20px}.native-app .settings-close{display:grid;place-items:center;flex:0 0 34px;padding:6px;min-width:34px}
+.native-app .settings-content{display:flex;flex-direction:column;gap:10px}.native-app .settings-content>label{margin:0}.native-app .settings-content select{width:100%;margin:0}.native-app .settings-content p{font-size:12px;line-height:1.5;color:var(--muted);margin:0}.native-app .settings-content .invitation-confirmation{display:flex;align-items:flex-start;gap:9px;white-space:normal;font-size:13px;line-height:1.5;margin-top:8px}.native-app .settings-content #confirm-invitation{margin:3px 0 0;flex-shrink:0}
+.native-app .settings-footer{display:flex;justify-content:flex-end;margin-top:22px}

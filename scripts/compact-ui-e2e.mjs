@@ -43,18 +43,24 @@ try {
   assert.equal(await owner.locator('#tab-transfer').isDisabled(), true);
   for (const viewport of [{ width: 1366, height: 768 }, { width: 760, height: 560 }, { width: 390, height: 844 }]) {
     await owner.setViewportSize(viewport); await fit(owner, 'desktop connection');
+    const gear=await owner.locator('#open-settings').boundingBox(),bar=await owner.locator('.workspace-bar').boundingBox(),tab=await owner.locator('#tab-connection').boundingBox();
+    assert.ok(Math.abs(gear.y+gear.height/2-tab.y-tab.height/2)<2,'settings gear shares the tab row');assert.ok(Math.abs(gear.x+gear.width-bar.x-bar.width)<2,'settings gear is at the far right');
+    await owner.locator('#open-settings').click();assert.ok(await owner.locator('#connection-settings').evaluate(dialog=>dialog.matches(':modal')));assert.equal(await owner.locator('#connection-settings summary').count(),0);
+    const modal=await owner.locator('#connection-settings').boundingBox();assert.ok(modal.x>=0&&modal.y>=0&&modal.x+modal.width<=viewport.width+1&&modal.y+modal.height<=viewport.height+1);
+    await owner.screenshot({path:viewport.width===390?'artifacts/settings-modal-mobile.png':'artifacts/settings-modal-desktop.png'});await owner.keyboard.press('Escape');assert.ok(await owner.locator('#connection-settings').isHidden());assert.ok(await owner.locator('#open-settings').evaluate(button=>button===document.activeElement));
     const cards = await owner.locator('#pc-connect,#connection').evaluateAll(nodes => nodes.map(node => ({ x: node.getBoundingClientRect().x, y: node.getBoundingClientRect().y })));
     assert.equal(cards[0].y, cards[1].y, 'Connect and invite must be side by side'); assert.ok(cards[1].x > cards[0].x);
   }
   await owner.setViewportSize({ width: 1366, height: 768 });
   await owner.screenshot({ path: 'artifacts/compact-desktop-connection.png' });
-  await owner.locator('#connection-settings').evaluate(el => el.open = true);
-  await owner.locator('#connection-mode').selectOption('internet'); await fit(owner, 'desktop internet');
+  await owner.locator('#open-settings').click();
+  await owner.locator('#connection-mode').selectOption('internet');await owner.locator('#connection-settings [data-close-settings]').last().click();await fit(owner, 'desktop internet');
   assert.ok(await owner.locator('#internet-option').isVisible()); assert.ok(!await owner.locator('#desktop-lan').isVisible());
-  await owner.locator('#connection-mode').selectOption('lan'); await owner.locator('#connection-settings').evaluate(el => el.open = false);
+  await owner.locator('#open-settings').click();await owner.locator('#connection-mode').selectOption('lan');await owner.locator('#connection-settings [data-close-settings]').first().click();
   await client.locator('#pc-address').fill(`http://127.0.0.1:${first.port}/#pin=${first.pin}`);
   await client.locator('#pc-connect-submit').click();
   await owner.locator('#tab-transfer[aria-selected=true]').waitFor(); await client.locator('#tab-transfer[aria-selected=true]').waitFor();
+  await owner.locator('#open-settings').click();assert.ok(await owner.locator('#connection-settings').isVisible());await owner.locator('#confirm-invitation').check();await owner.mouse.click(2,2);assert.ok(await owner.locator('#connection-settings').isHidden());assert.equal(await owner.locator('[role=tab][aria-selected=true]').getAttribute('id'),'tab-transfer');await owner.locator('#open-settings').click();assert.ok(await owner.locator('#confirm-invitation').isChecked());await owner.locator('#confirm-invitation').uncheck();await owner.keyboard.press('Escape');
   for (const [name, data] of [['auto.bin', randomBytes(1024 * 1024 + 17)], ['auto-empty.txt', Buffer.alloc(0)]]) {
     await owner.locator('#tab-connection').click();
     await client.locator('#files').setInputFiles({ name, mimeType: 'application/octet-stream', buffer: data });
