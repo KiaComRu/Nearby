@@ -2,7 +2,7 @@ import http from 'node:http';
 import { randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { mkdir, open, readFile, rename, rm, stat, statfs } from 'node:fs/promises';
-import { networkInterfaces } from 'node:os';
+import { networkInterfaces, hostname } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pipeline } from 'node:stream/promises';
@@ -13,6 +13,7 @@ import { createStatisticsReporter } from './transfer-statistics.mjs';
 import { createLanPeer } from './lan-peer.mjs';
 import { createLanDiscovery } from './lan-discovery.mjs';
 import { createTrustedLan } from './trusted-lan.mjs';
+import { createInternetGateway, INTERNET_API, INTERNET_LIMIT } from './internet-gateway.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const token = () => randomBytes(24).toString('hex');
@@ -38,12 +39,12 @@ function sameSecret(a, b) {
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
-async function jsonBody(req) {
+async function jsonBody(req, maximum = 8192) {
   let size = 0;
   const chunks = [];
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > 8192) throw fail(413, 'Слишком большой запрос.');
+    if (size > maximum) throw fail(413, 'Слишком большой запрос.');
     chunks.push(chunk);
   }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
@@ -80,6 +81,7 @@ export async function createApp({
   maxSize = 100 * 1024 ** 3,
   openReceivedFolder = openFolder,
   openTransferredFile = openFolder,
+  internetEndpoint = INTERNET_API,
   statistics = {},
   discovery = host === '0.0.0.0' && process.env.NEARBY_DISABLE_DISCOVERY !== '1' ? {} : false,
   trustedLan = host === '0.0.0.0' && process.env.NEARBY_DISABLE_TRUSTED_LAN !== '1' ? {} : false,
@@ -114,6 +116,7 @@ export async function createApp({
   const offers = new Map();
   const shares = new Map();
   const tickets = new Map();
+  const internetRequest = createInternetGateway(internetEndpoint);
   const active = new Set();
   const transferRequests = new Set();
   let preparingUpdate = false;
@@ -135,8 +138,8 @@ export async function createApp({
     addresses = readAddresses(); allowedHosts.clear();
     for (const address of ['localhost', '127.0.0.1', ...addresses, ...(host === '0.0.0.0' ? [] : [host])]) allowedHosts.add(address);
   }
-  const publicOffer = ({ id, name, size, state, created, received, device, error, secure }) =>
-    ({ id, name, size, state, created, received, device, error, secure });
+  const publicOffer = ({ id, name, size, state, created, received, device, error, secure, internet }) =>
+    ({ id, name, size, state, created, received, device, error, secure, ...(internet ? {internet:true} : {}) });
   const publicShare = ({ id, name, size, recipientName, created, state, completedAt }) => ({ id, name, size, recipientName, created, state, completedAt });
 
   function auth(req, adminOnly = false) {
@@ -163,6 +166,9 @@ export async function createApp({
     for (const [key, value] of attempts) if (now - value.since > ttl) attempts.delete(key);
     for (const [key, value] of tickets) if (now > value.expires) tickets.delete(key);
     for (const offer of offers.values()) {
+      if (offer.internet && offer.state === 'uploading' && offer.internetExpires && now > offer.internetExpires) {
+        offer.state = 'failed'; offer.error = 'Интернет-приём прерван. Отправьте файл заново.';
+      }
       if (['pending', 'accepted'].includes(offer.state) && now > offer.expires) {
         offer.state = 'expired';
       }
@@ -211,6 +217,7 @@ export async function createApp({
   const staticFiles = new Map([
     ['/', ['index.html', 'text/html; charset=utf-8']],
     ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
+    ['/native-internet.js', ['native-internet.js', 'text/javascript; charset=utf-8']],
     ['/file-presentation.js', ['file-presentation.js', 'text/javascript; charset=utf-8']],
     ['/file-presentation.css', ['file-presentation.css', 'text/css; charset=utf-8']],
     ['/shell-send.js', ['shell-send.js', 'text/javascript; charset=utf-8']],
@@ -246,6 +253,38 @@ export async function createApp({
         const requestId = Symbol(); transferRequests.add(requestId);
         const done = () => transferRequests.delete(requestId);
         res.once('finish', done); res.once('close', done);
+      }
+      if (req.method === 'POST' && url.pathname === '/api/internet') {
+        auth(req,true);
+        const body = await jsonBody(req,1024**2);
+        if (body.action === 'relay-pull' && /^[a-f0-9]{32}$/.test(body.room || '')) for (const offer of offers.values()) {
+          if (offer.internetRoom === body.room && offer.state === 'uploading' && offer.internetExpires) offer.internetExpires = Date.now()+120000;
+        }
+        json(res,200,await internetRequest(body)); return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/internet/receives') {
+        auth(req,true);
+        const body = await jsonBody(req), spec = fileSpec(body,INTERNET_LIMIT);
+        if (!/^[a-f0-9]{32}$/.test(body.room || '')) throw fail(400,'Неверное интернет-подключение.');
+        if (offers.size >= maxRecords || [...offers.values()].filter(offer=>offer.internet && offer.state === 'uploading').length >= 8) throw fail(429,'Дождитесь окончания текущих передач.');
+        const offer = {...spec,id:randomUUID(),owner:'internet:'+body.room,device:typeof body.device === 'string' ? body.device.replace(/[\x00-\x1f\x7f]/g,'').slice(0,80) : 'Интернет-устройство',internet:true,internetRoom:body.room,internetExpires:Date.now()+120000,state:'uploading',received:0,created:Date.now()};
+        offers.set(offer.id,offer); json(res,201,publicOffer(offer)); return;
+      }
+      const internetReceive = url.pathname.match(/^\/api\/internet\/receives\/([a-f0-9-]{36})\/(upload|cancel)$/);
+      if (req.method === 'POST' && internetReceive) {
+        auth(req,true); const offer = offers.get(internetReceive[1]);
+        if (!offer?.internet || offer.state !== 'uploading') throw fail(409,'Интернет-приём больше не доступен.');
+        if (internetReceive[2] === 'cancel') {
+          if (!offer.internetExpires) throw fail(409,'Файл уже сохраняется.');
+          offer.state='failed';offer.error='Передача отменена.';json(res,200,{ok:true});return;
+        }
+        if (!offer.internetExpires) throw fail(409,'Файл уже сохраняется.');
+        offer.internetExpires = null;
+        try { offer.path = await receive(req,offer,inbox,bytes=>{offer.received=bytes;});offer.state='completed';json(res,201,publicOffer(offer)); }
+        catch(error) {offer.state='failed';offer.error='Не удалось сохранить интернет-файл. Отправьте его заново.';throw error;}
+        // The authenticated internet pairing reports this transfer once, after
+        // FileLink acknowledges durable saving. Do not report it a second time.
+        return;
       }
       if (req.method === 'GET' && url.pathname === '/api/send-targets') {
         auth(req, true);
@@ -351,6 +390,7 @@ export async function createApp({
         if (!user.admin) connectedDevices.set(user.key, { id: connectedDevices.get(user.key)?.id || randomUUID(), name: user.device, secure: !!user.trustedFingerprint, fingerprint: user.trustedFingerprint, lastSeen: Date.now() });
         json(res, 200, {
           admin: user.admin,
+          computerName: user.admin ? hostname().slice(0,40) : undefined,
           connectedDevices: user.admin ? [...connectedDevices.values()].map(({ name, secure }) => ({ name, secure })) : undefined,
           peerConnection: user.admin ? peer.connection : undefined,
           pin: user.admin ? pin : undefined,

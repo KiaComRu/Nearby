@@ -14,8 +14,8 @@ using Microsoft.Web.WebView2.WinForms;
 
 [assembly: System.Reflection.AssemblyTitle("Nearby")]
 [assembly: System.Reflection.AssemblyDescription("Передача файлов по локальной сети")]
-[assembly: System.Reflection.AssemblyVersion("0.5.9.0")]
-[assembly: System.Reflection.AssemblyFileVersion("0.5.9.0")]
+[assembly: System.Reflection.AssemblyVersion("0.6.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("0.6.0.0")]
 #if SERVER2016
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.6.2")]
 #endif
@@ -371,8 +371,10 @@ internal sealed class NearbyWindow : Form
                         string objectId = null;
                         try {
                             int index = Convert.ToInt32(value["index"]);
+                            string input = value.ContainsKey("input") ? value["input"] as string : "files";
+                            if (input != "files" && input != "shell-files") throw new InvalidOperationException();
                             if (index < 0 || index >= 10000 || localFiles.Count >= 2000) throw new InvalidOperationException();
-                            var evaluated = serializer.Deserialize<Dictionary<string, object>>(await web.CoreWebView2.CallDevToolsProtocolMethodAsync("Runtime.evaluate", serializer.Serialize(new { expression = "document.getElementById('files').files[" + index + "]" })));
+                            var evaluated = serializer.Deserialize<Dictionary<string, object>>(await web.CoreWebView2.CallDevToolsProtocolMethodAsync("Runtime.evaluate", serializer.Serialize(new { expression = "document.getElementById('" + input + "').files[" + index + "]" })));
                             var result = (Dictionary<string, object>)evaluated["result"];
                             objectId = result.ContainsKey("objectId") ? result["objectId"] as string : null;
                             if (objectId == null) throw new InvalidOperationException();

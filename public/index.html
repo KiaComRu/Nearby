@@ -13,6 +13,7 @@
   <script src="/tabs.js?v=tabs-1" defer="">
 </script>
 <script src="/file-presentation.js" defer=""></script>
+<script src="/native-internet.js" defer=""></script>
 <script src="/app.js" defer="">
 </script>
   <script src="/statistics.js" defer="">
@@ -29,7 +30,7 @@
 </a>
 <span class="badge">
 <span class="online-dot">
-</span> Передача по локальной сети</span>
+</span> Локальная сеть и интернет</span>
 </header>
   <main>
     <div class="intro">
@@ -63,7 +64,7 @@
 <button id="shell-cancel" type="button" class="secondary" hidden="">Остановить отправку</button>
 <button id="shell-clear" type="button" class="secondary">Убрать файлы</button>
 </div>
-      <p class="subtle">Нет нужного устройства? Закройте это окно и подключитесь в Nearby — выбранные файлы сохранятся здесь. Для папки сначала создайте ZIP-архив. Интернет-подключения веб-версии открываются отдельно в браузере.</p>
+      <p class="subtle">Нет нужного устройства? Закройте это окно и подключитесь в Nearby — выбранные файлы сохранятся здесь. Для папки сначала создайте ZIP-архив. Интернет-устройства доступны в этом же списке.</p>
     </dialog>
 
 
@@ -81,7 +82,7 @@
 <option value="lan">Локальная сеть</option>
 <option value="internet">Интернет</option>
 </select>
-<p>В одной сети — приложение. В разных сетях — веб-версия.</p><label class="invitation-confirmation"><input id="confirm-invitation" type="checkbox"> Подтверждать подключение по QR-коду или ссылке</label>
+<p>Локальная сеть — для устройств рядом. Интернет — для разных Wi-Fi и мобильных сетей.</p><label class="invitation-confirmation"><input id="confirm-invitation" type="checkbox"> Подтверждать подключение по QR-коду или ссылке</label>
 </details>
 <div id="desktop-lan" class="desktop-lan">
 <section id="join" class="panel" hidden="">
@@ -215,19 +216,24 @@
 <section class="panel internet-mode" aria-labelledby="internet-heading" id="internet-option" hidden="">
 <div class="step">УСТРОЙСТВА В РАЗНЫХ СЕТЯХ</div>
 <h2>Подключение через интернет</h2>
-<p>Оба устройства работают в веб-версии. До 100 МиБ на файл, с шифрованием содержимого.</p>
+<p>Подключите ПК или телефон из любой сети по ID, ссылке или QR. Файлы зашифрованы, до 100 МиБ на файл. Полученные файлы сохраняются в папку Nearby.</p>
+<label for="internet-name">Имя этого компьютера</label><input id="internet-name" maxlength="40" autocomplete="off" placeholder="Имя компьютера">
 <div class="internet-actions">
 <article class="panel">
 <h2>Подключиться</h2>
-<p>Откройте приглашение другого устройства в браузере.</p>
-<a class="internet-link" href="https://nearby.kiacom.ru/web/" target="_blank" rel="noopener">Открыть веб-версию ↗</a>
+<form id="internet-join-form"><label for="internet-id">ID или ссылка другого устройства</label><input id="internet-id" autocomplete="off" placeholder="123-456-789 или ссылка" required><button id="internet-join" type="submit">Подключиться</button></form>
 </article>
 <article class="panel">
 <h2>Пригласить</h2>
-<p>Создайте приглашение в веб-версии и отправьте его второму устройству.</p>
-<a class="internet-link" href="https://nearby.kiacom.ru/web/" target="_blank" rel="noopener">Создать веб-приглашение ↗</a>
+<p>Создайте ID здесь. На другом ПК выберите «Интернет» или откройте QR камерой телефона.</p>
+<button id="internet-create" type="button">Создать приглашение</button>
 </article>
 </div>
+<div id="internet-invitation" hidden><div class="internet-id-row"><output id="internet-code" aria-label="Интернет-ID"></output><button id="internet-copy-id" type="button" class="secondary">Скопировать ID</button></div><p id="internet-expiry" class="subtle">Одно приглашение · 15 минут</p><canvas id="internet-qr" aria-label="Интернет QR-код"></canvas><input id="internet-link" readonly aria-label="Интернет-приглашение"><button id="internet-copy-link" type="button" class="secondary">Скопировать ссылку</button></div>
+<p id="internet-status" role="status" aria-live="polite"></p>
+<div id="internet-approval" hidden><p><strong id="internet-peer"></strong> хочет подключиться. Проверьте, что это ваше устройство.</p><button id="internet-approve" type="button">Разрешить подключение</button><button id="internet-reject" type="button" class="secondary">Отклонить</button></div>
+<button id="internet-stop" type="button" class="secondary" hidden>Отменить приглашение</button>
+<div id="internet-connections"></div>
 </section>
 </section>
 <section id="devices-pane" class="tab-panel" role="tabpanel" aria-labelledby="tab-devices" hidden><section class="panel devices-panel"><h2>Подключённые устройства</h2><p class="subtle">Выберите получателя, затем откройте вкладку «Передача».</p><div id="device-list" class="device-list" role="radiogroup" aria-label="Получатель файлов"></div><button id="devices-transfer" type="button">Перейти к передаче</button></section></section>

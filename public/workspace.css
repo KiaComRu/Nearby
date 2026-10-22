@@ -150,3 +150,17 @@ body.compact-app{height:100vh;height:100dvh;min-height:0;display:flex;flex-direc
 .native-app #connection-settings{display:block;flex-shrink:0;font-size:12px}.native-app #connection-settings summary{cursor:pointer;color:var(--muted)}.native-app #connection-settings[open]{overflow:auto;max-height:170px}.native-app #connection-settings select{width:auto;margin:8px}.native-app #confirm-invitation{width:16px;min-height:0;vertical-align:middle}.native-app #transfer-workspace{display:flex;flex-direction:column;min-height:0;flex:1;gap:10px}.native-app .transfer-table .file-row{display:table-row}.native-app .transfer-table .file-name{font-size:12px;white-space:normal;overflow-wrap:anywhere}.native-app .transfer-table .file-meta{font-size:11px}.native-app .recipient-bar{flex-shrink:0}
 
 .native-app{--cyan:var(--green);--panel:#fff}.native-app .device-target:has(input:checked){background:#edf4e7}
+.native-app #internet-option{overflow:auto;flex:1;padding:16px}
+.native-app #internet-name{max-width:320px;margin:5px 0 12px}
+.native-app .internet-actions{margin:8px 0 12px}
+.native-app .internet-actions .panel{padding:14px}
+.native-app #internet-join-form{display:flex;flex-direction:column;gap:8px}
+.native-app #internet-invitation{padding:12px;border:1px solid var(--line);border-radius:12px;display:grid;grid-template-columns:170px 1fr;gap:10px;align-items:center}
+.native-app .internet-id-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;grid-column:1/-1}
+.native-app #internet-code{font:700 26px/1.3 ui-monospace,monospace;color:var(--green);letter-spacing:1px}
+.native-app #internet-expiry{grid-column:1/-1}
+.native-app #internet-qr{grid-row:span 2;max-width:170px;height:auto;background:#fff}
+.native-app #internet-status{margin:10px 0;overflow-wrap:anywhere}
+.native-app .internet-connected{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--line)}
+.native-app #internet-approval{border:1px solid var(--line);border-radius:10px;padding:12px;margin:8px 0}
+@media(max-width:550px){.native-app .internet-actions{grid-template-columns:1fr}.native-app #internet-invitation{grid-template-columns:1fr}.native-app #internet-qr{grid-row:auto}.native-app #internet-code{font-size:22px}}

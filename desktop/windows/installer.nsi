@@ -4,7 +4,7 @@
 !include "x64.nsh"
 !include "FileFunc.nsh"
 !ifndef VERSION
-  !define VERSION "0.5.9"
+  !define VERSION "0.6.0"
 !endif
 Var UpdatePID
 !ifndef PAYLOAD

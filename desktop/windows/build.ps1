@@ -17,6 +17,8 @@ $taskNodeVersion = (& $taskNode --version).Trim()
 if ([int]($taskNodeVersion.TrimStart('v').Split('.')[0]) -lt 22) { throw 'Нужен Node.js 22 или новее.' }
 if ($Target -eq 'Server2016' -and [int]($taskNodeVersion.TrimStart('v').Split('.')[0]) -ne 24) { throw 'Для проверенного профиля Server 2016 нужен Node.js 24 x64.' }
 if (-not [Environment]::Is64BitProcess) { throw 'Запустите сборку из 64-разрядного PowerShell.' }
+& $taskNode (Join-Path $taskRoot 'scripts/build-native-internet.mjs')
+if ($LASTEXITCODE -ne 0) { throw 'Не удалось собрать интернет-клиент.' }
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 # Always package a fresh payload; native test helpers and stale files must never ship.
 $taskStageFull = [IO.Path]::GetFullPath($taskStage)
@@ -75,6 +77,7 @@ $taskRuntime = Join-Path $taskStage 'runtime'
 $taskLicenses = Join-Path $taskStage 'licenses'
 New-Item -ItemType Directory -Force -Path $taskApp,$taskRuntime,$taskLicenses,(Join-Path $taskApp 'desktop\windows') | Out-Null
 Copy-Item -LiteralPath (Join-Path $taskRoot 'server.mjs') -Destination $taskApp
+Copy-Item -LiteralPath (Join-Path $taskRoot 'internet-gateway.mjs') -Destination $taskApp
 Copy-Item -LiteralPath (Join-Path $taskRoot 'transfer-statistics.mjs') -Destination $taskApp
 Copy-Item -LiteralPath (Join-Path $taskRoot 'lan-peer.mjs') -Destination $taskApp
 Copy-Item -LiteralPath (Join-Path $taskRoot 'lan-discovery.mjs') -Destination $taskApp

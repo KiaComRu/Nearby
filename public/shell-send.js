@@ -1,7 +1,7 @@
 (() => {
   const $ = id => document.getElementById(id), dialog = $('shell-send');
   if (!dialog) return;
-  let entries = [], targets = [], busy = false, controller, refreshing = false, selectedId = '';
+  let entries = [], targets = [], busy = false, controller, refreshing = false, selectedId = '', selectionVersion = 0;
   const token = () => sessionStorage.getItem('nearby-token') || '';
   const size = bytes => {
     const units = ['Б', 'КБ', 'МБ', 'ГБ', 'ТБ']; let value = bytes, unit = 0;
@@ -20,7 +20,7 @@
     $('shell-reopen').hidden = entries.length === 0;
     $('shell-reopen').textContent = `Файлы из Проводника (${entries.length})`;
     $('shell-target').disabled = busy;
-    $('shell-start').disabled = busy || !targets.some(target => target.id === $('shell-target').value) || !entries.some(entry => ['ready','failed'].includes(entry.state));
+    $('shell-start').disabled = busy || !targets.some(target => target.id === $('shell-target').value && target.ready !== false) || !entries.some(entry => ['ready','failed'].includes(entry.state));
     $('shell-clear').disabled = busy;
     $('shell-cancel').hidden = !busy;
     $('shell-queue').replaceChildren();
@@ -36,16 +36,20 @@
       row.append(info, remove); $('shell-queue').append(row);
     }
   }
+  async function sendTargets(signal) {
+    const result = await request('/api/send-targets',{signal});
+    return {targets:[...result.targets,...(window.NearbyGetInternetTargets?.()||[])]};
+  }
   async function refreshTargets() {
     if (refreshing || busy || !dialog.open) return;
     refreshing = true;
     try {
-      const result = await request('/api/send-targets'), selected = selectedId;
+      const result = await sendTargets(), selected = selectedId;
       targets = result.targets;
       $('shell-target').replaceChildren();
       const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = targets.length ? 'Выберите устройство' : 'Нет подключённых устройств'; $('shell-target').append(placeholder);
       for (const target of targets) {
-        const option = document.createElement('option'); option.value = target.id; option.textContent = `${target.name} · ${target.secure ? 'TLS' : 'локальная сеть'}`; $('shell-target').append(option);
+        const option = document.createElement('option'); option.value = target.id; option.textContent = `${target.name} · ${target.kind === 'internet' ? 'интернет' : target.secure ? 'TLS' : 'локальная сеть'}`; $('shell-target').append(option);
       }
       // Never substitute a new device when a previously selected one disconnects.
       if (targets.some(target => target.id === selected)) $('shell-target').value = selected;
@@ -58,7 +62,8 @@
   document.addEventListener('nearby-shell-selection', () => {
     const files = Array.from($('shell-files').files);
     if (files.length + entries.length > 100) { open(); $('shell-status').textContent = 'Можно выбрать до 100 файлов за раз. Уберите прежние файлы или выберите меньше новых.'; return; }
-    for (const file of files) entries.push({ file, state: 'ready' });
+    const version = ++selectionVersion;
+    for (const [nativeIndex,file] of files.entries()) entries.push({ file, state: 'ready', nativeIndex, selectionVersion:version });
     open();
   });
   $('shell-reopen').addEventListener('click', open);
@@ -98,10 +103,14 @@
     for (const entry of batch) {
       if (signal.aborted) break;
       try {
-        const current = await request('/api/send-targets', { signal });
+        const current = await sendTargets(signal);
         if (!current.targets.some(item => item.id === target.id && item.kind === target.kind)) throw new Error('Устройство отключилось. Выберите получателя ещё раз.');
         if (entry.file.size > target.maxSize) throw new Error('Файл превышает лимит получателя.');
-        if (target.kind === 'client') {
+        if (target.kind === 'internet') {
+          entry.state='sending';entry.message=`Передаём через интернет «${target.name}»`;render();
+          await window.NearbySendInternet(target,entry.file,{signal,nativeIndex:entry.selectionVersion===selectionVersion?entry.nativeIndex:undefined,onProgress:bytes=>{entry.loaded=bytes;render();}});
+          entry.message=`Получено и сохранено на «${target.name}»`;
+        } else if (target.kind === 'client') {
           entry.state = 'sending'; entry.message = `Предлагаем «${target.name}»`; render();
           const uploaded = await upload(`/api/shares?recipient=${encodeURIComponent(target.id)}&name=${encodeURIComponent(entry.file.name)}&size=${entry.file.size}`, entry, target, signal);
           entry.message = `Доступен только «${target.name}» — ожидает скачивания`;

@@ -13,7 +13,7 @@ let addressSignature;
 let sending = false;
 window.nearbyUpdateBusy = () => sending || !state ||
   state.offers.some(offer => ['pending', 'accepted', 'uploading'].includes(offer.state)) ||
-  document.querySelector('#shell-send')?.open === true;
+  document.querySelector('#shell-send')?.open === true || internetClient.busy() || internetBufferedBytes > 0;
 let peerMode = false;
 let connectionAvailable = false;
 let joinMode = false;
@@ -25,19 +25,87 @@ const incomingSeen = new Set(), automaticDownloads = new Map();
 const pairingSeen = new Set();
 let downloadedShares = new Set();
 try { downloadedShares = new Set(JSON.parse(sessionStorage.getItem('nearby-downloaded-shares') || '[]')); } catch {}
-let targets = [], selectedTargetId = '', selectionLost = false, previousDeviceCount = 0, deviceSignature = '', remoteState = null;
+let targets = [], lanTargets = [], selectedTargetId = '', selectionLost = false, previousDeviceCount = 0, deviceSignature = '', remoteState = null;
 const records = new Map(), hiddenRecords = new Set(), nativeFiles = new Set(), nativePending = new Map(), nativePreviewPending = new Map();
 let recordSequence = 0;
 try { for (const key of JSON.parse(sessionStorage.getItem('nearby-hidden-records') || '[]')) hiddenRecords.add(key); } catch {}
 const selectedTarget = () => targets.find(target => target.id === selectedTargetId);
 const targetPrefix = target => target?.kind === 'peer' ? '/api/peer/remote' : '';
 const nativeBridge = window.chrome?.webview;
-function registerNativeFile(id, index) {
+let internetBufferedBytes = 0;
+const internetUI = {invitation:null,liveSignature:'',expiryTimer:null};
+const internetRecord = (connection,id) => [...records.values()].find(record=>record.internetRoom===connection.id&&record.internetFileId===id);
+const internetClient = new window.NearbyInternet.Client({
+  request:(action,extra,session)=>api('/api/internet',{method:'POST',data:{action,...(session?{room:session.room,token:session.token}:{}),...extra}}),
+  onChange:()=>{if(state){targets=[...lanTargets,...internetClient.targets()];renderConnection();renderInternet();}},
+  onNotice:text=>{$('internet-status').textContent=text;},
+  onStatus:(connection,title,detail)=>{if(internetClient.pending===connection)$('internet-status').textContent=title+'. '+detail;},
+  onInvitation:(connection,invite)=>{
+    internetUI.invitation=invite;$('internet-code').textContent=invite.id;$('internet-link').value=invite.url;
+    $('internet-expiry').textContent='Одно приглашение · 15 минут';$('internet-copy-id').disabled=false;$('internet-copy-link').disabled=false;
+    void window.NearbyInternet.drawQR($('internet-qr'),invite.url).catch(()=>{$('internet-status').textContent='Используйте ID или ссылку: QR-код недоступен.';});
+    clearTimeout(internetUI.expiryTimer);internetUI.expiryTimer=setTimeout(()=>{$('internet-expiry').textContent='Приглашение истекло. Создайте новое.';$('internet-copy-id').disabled=true;$('internet-copy-link').disabled=true;},Math.max(0,invite.expires*1000-Date.now()));
+    $('internet-status').textContent='Ожидаем другое устройство.';renderInternet();
+  },
+  onPeerRequest:(connection,name)=>{$('internet-peer').textContent=name;$('internet-approval').hidden=false;},
+  onApproved:()=>{internetUI.invitation=null;clearTimeout(internetUI.expiryTimer);$('internet-approval').hidden=true;$('internet-invitation').hidden=true;},
+  onReady:connection=>{internetUI.invitation=null;clearTimeout(internetUI.expiryTimer);$('internet-approval').hidden=true;$('internet-status').textContent=`Подключено через интернет: ${connection.peerName}.`;},
+  onOffer:(connection,spec,link)=>{void receiveInternetFile(connection,spec,link);},
+  onProgress:(connection,id,bytes,direction)=>{
+    const record=internetRecord(connection,id);if(record){record.received=bytes;record.status=`${direction==='sending'?'Отправляем':'Принимаем'}: ${sizes(bytes)} / ${sizes(record.size)}`;rendered='';renderTransfers();}
+    if(connection.extraProgress?.id===id)connection.extraProgress.onProgress?.(bytes);
+  },
+  onComplete:(connection,id,direction)=>{
+    const record=internetRecord(connection,id);if(!record)return;record.busy=false;record.status=direction==='sent'?'Передан получателю':'Получено и сохранено';
+    if(direction==='received')void connection.reportStatistics('record-transfer',{id,size:record.size});rendered='';renderTransfers();
+  },
+  onError:(connection,id,text)=>{const record=internetRecord(connection,id);if(record){record.busy=false;record.failed=true;record.status=text;rendered='';renderTransfers();}},
+  onClosed:(connection,text,expected)=>{if(!internetClient.pending){internetUI.invitation=null;clearTimeout(internetUI.expiryTimer);$('internet-approval').hidden=true;$('internet-status').textContent=text;}if(!expected)message(text);}
+});
+
+function renderInternet() {
+  if(!state)return;
+  if(!$('internet-name').value)$('internet-name').value=state.computerName||'Компьютер';
+  const pending=internetClient.pending,busy=Boolean(pending||internetClient.working)||!state.admin;
+  $('internet-create').disabled=busy;$('internet-join').disabled=busy;$('internet-id').disabled=busy;$('internet-name').disabled=busy;
+  $('internet-invitation').hidden=!pending||pending.session.role!=='host'||!internetUI.invitation;
+  $('internet-stop').hidden=!pending;$('internet-stop').disabled=internetClient.working;
+  const connected=internetClient.targets(),signature=JSON.stringify(connected);
+  if(signature!==internetUI.liveSignature){
+    internetUI.liveSignature=signature;$('internet-connections').replaceChildren();
+    for(const target of connected){const item=document.createElement('div');item.className='internet-connected';const name=document.createElement('span');name.textContent=target.name+(target.ready?' · интернет':' · восстанавливаем связь');item.append(name,button('Отключить',()=>internetClient.disconnect(target),true));$('internet-connections').append(item);}
+  }
+}
+async function receiveInternetFile(connection,spec,link) {
+  const key=`internet:${connection.id}:${spec.id}`,record=keepRecord(key,{name:spec.name,size:spec.size,direction:'incoming',device:connection.peerName,internet:true,internetRoom:connection.id,internetFileId:spec.id,busy:true,status:'Подготавливаем приём',received:0});
+  window.NearbyWorkspace.incoming();rendered='';renderTransfers();
+  let reservation,parts=[],reserved=false,finished=false;const controller=new AbortController();
+  const release=()=>{parts=[];if(reserved){internetBufferedBytes-=spec.size;reserved=false;}};
+  const abort=async()=>{controller.abort();release();if(reservation&&!finished)await api(`/api/internet/receives/${reservation.id}/cancel`,{method:'POST',data:{}}).catch(()=>{});};
+  try{
+    if(internetBufferedBytes+spec.size>100*1024**2)throw new Error('Дождитесь завершения текущего интернет-приёма.');
+    internetBufferedBytes+=spec.size;reserved=true;
+    reservation=await api('/api/internet/receives',{method:'POST',data:{name:spec.name,size:spec.size,room:connection.id,device:connection.peerName}});
+    record.serverId=reservation.id;record.serverKind='offer';records.delete('offer:'+reservation.id);
+    if(connection.stopped||link.closed)throw new Error('Интернет-соединение закрыто.');
+    await link.accept(spec.id,{
+      write:async data=>{parts.push(data);},
+      close:async()=>{
+        try{const blob=new Blob(parts);parts=[];record.status='Сохраняем файл на компьютере…';rendered='';renderTransfers();
+          const response=await fetch(`/api/internet/receives/${reservation.id}/upload`,{method:'POST',headers:{Authorization:`Bearer ${authToken}`},body:blob,signal:controller.signal});
+          const result=await response.json();if(!response.ok)throw new Error(result.error||'Файл не сохранён.');
+          finished=true;record.localStored=true;return null;
+        }finally{release();}
+      },abort
+    });
+  }catch(error){await abort();link.cancel(spec.id,error.message||'Не удалось принять интернет-файл.');}
+}
+function registerNativeFile(id, index, input = 'files') {
   if (!nativeBridge) return Promise.resolve(false);
   return new Promise(resolve => {
     const timer = setTimeout(() => { nativePending.delete(id); resolve(false); }, 5000);
     nativePending.set(id, result => { clearTimeout(timer); resolve(result); });
-    nativeBridge.postMessage({ type: 'nearby-register-file', id, index });
+    nativeBridge.postMessage({ type: 'nearby-register-file', id, index, input });
   });
 }
 nativeBridge?.addEventListener('message', event => {
@@ -171,12 +239,12 @@ function renderDevices() {
       const radio = document.createElement('input'); radio.type = 'radio'; radio.name = 'send-target'; radio.value = target.id; radio.checked = target.id === selectedTargetId; radio.disabled = sending;
       radio.addEventListener('change', () => { selectedTargetId = target.id; selectionLost = false; renderConnection(); });
       const info = document.createElement('span'), name = document.createElement('strong'), transport = document.createElement('small');
-      name.textContent = target.name; name.className = 'device-name'; transport.textContent = target.secure ? 'TLS · защищённое соединение' : 'Локальная сеть'; info.append(name, transport); card.append(radio, info); $('device-list').append(card);
+      name.textContent = target.name; name.className = 'device-name'; transport.textContent = target.kind === 'internet' ? target.ready ? 'Интернет · сквозное шифрование' : 'Интернет · восстанавливаем связь' : target.secure ? 'TLS · защищённое соединение' : 'Локальная сеть'; info.append(name, transport); card.append(radio, info); $('device-list').append(card);
     }
   }
   const target = selectedTarget();
   $('recipient-name').textContent = target?.name || 'Устройство не выбрано'; $('devices-transfer').disabled = !target || sending;
-  $('files').disabled = !connectionAvailable || !target || sending; $('drop').classList.toggle('disabled', !target || sending);
+  $('files').disabled = !connectionAvailable || !target || target.ready === false || sending; $('drop').classList.toggle('disabled', !target || target.ready === false || sending);
   $('select-remaining').hidden = Boolean(target) || targets.length !== 1;
   if (!$('select-remaining').hidden) $('remaining-name').textContent = targets[0].name;
   if (targets.length > previousDeviceCount && targets.length > 1 && !sending) window.NearbyWorkspace.selectTab('devices');
@@ -198,6 +266,9 @@ function showTrustedPanel() {
 
 function render() {
   renderConnection();
+  renderInternet();
+  $('connection-mode').querySelector('option[value=internet]').disabled = !state.admin;
+  if (!state.admin && $('connection-mode').value === 'internet') { $('connection-mode').value = 'lan'; $('desktop-lan').hidden = false; $('internet-option').hidden = true; }
   $('join').hidden = true; $('workspace').hidden = false;
   $('connection').hidden = !state.admin;
   $('received-location').hidden = !(state.admin || state.localAdmin) || !state.receivedDirectory;
@@ -206,7 +277,7 @@ function render() {
   const devices = targets;
   for (const device of devices) {
     const item = document.createElement('div'); item.className = 'connected-device';
-    item.textContent = `${device.name} · ${device.secure ? 'TLS' : 'Локальная сеть'}`;
+    item.textContent = `${device.name} · ${device.kind === 'internet' ? 'Интернет' : device.secure ? 'TLS' : 'Локальная сеть'}`;
     $('connected-devices').append(item);
   }
   if (!devices.length) empty($('connected-devices'), 'Пока нет подключений.');
@@ -269,6 +340,7 @@ function renderTransfers() {
     if (record && !state.admin) receiveShare(record);
   }
   for (const offer of state.offers) {
+    if (offer.internet && [...records.values()].some(record=>record.internet && record.serverId===offer.id)) continue;
     if (!state.admin && queuedOffers.has(offer.id)) continue;
     const key = `offer:${offer.id}`;
     const record = keepRecord(key, { ...offer, serverId: offer.id, serverKind: 'offer', direction: state.admin ? 'incoming' : 'outgoing', status: statusNames[offer.state] || offer.state, localStored: state.admin && offer.state === 'completed', busy: ['pending','accepted','uploading'].includes(offer.state), failed: ['failed','rejected','expired'].includes(offer.state) });
@@ -349,11 +421,12 @@ async function refresh() {
     const result = await api('/api/state'); state = result; peerMode = Boolean(result.peerConnection); remoteState = null;
     if (result.admin) {
       const responses = await Promise.allSettled([api('/api/send-targets'), peerMode ? api('/api/peer/remote/api/state', { target: { ...result.peerConnection, kind: 'peer' } }) : Promise.resolve(null)]);
-      targets = responses[0].status === 'fulfilled' ? responses[0].value.targets : [];
+      lanTargets = responses[0].status === 'fulfilled' ? responses[0].value.targets : [];
       if (responses[1].status === 'fulfilled') remoteState = responses[1].value;
       else message(responses[1].reason.message || 'Нет связи с другим ПК.');
       state.peer = remoteState?.peer || result.peerConnection;
-    } else targets = [{ id: 'host', kind: 'host', name: 'Компьютер', maxSize: result.maxSize }];
+    } else lanTargets = [{ id: 'host', kind: 'host', name: 'Компьютер', maxSize: result.maxSize }];
+    targets = [...lanTargets,...(state.admin ? internetClient.targets() : [])];
     connectionAvailable = true; render();
   })().finally(() => { refreshing = null; });
   return refreshing;
@@ -566,6 +639,7 @@ async function sendFiles(files) {
       try {
         await registerNativeFile(key, index);
         if (file.size > target.maxSize) throw new Error(`Максимальный размер файла: ${sizes(target.maxSize)}.`);
+        if (target.kind === 'internet') { await sendInternetRecord(record,target,file); await refresh(); continue; }
         let url;
         if (target.kind === 'client') {
           record.serverKind = 'share'; url = `/api/shares?recipient=${encodeURIComponent(target.id)}&name=${encodeURIComponent(file.name)}&size=${file.size}`;
@@ -633,6 +707,30 @@ $('connection-mode').addEventListener('change', () => {
   const internet = $('connection-mode').value === 'internet';
   $('desktop-lan').hidden = internet; $('internet-option').hidden = !internet;
 });
+function internetName() { return $('internet-name').value.trim().slice(0,40) || state?.computerName || 'Компьютер'; }
+async function sendInternetRecord(record,target,file,options) {
+  const connection=internetClient.connection(target);
+  if(!connection?.ready||connection.stopped)throw new Error('Интернет-устройство отключилось.');
+  record.internet=true;record.internetRoom=connection.id;record.internetFileId=crypto.randomUUID();
+  await internetClient.send(target,file,record.internetFileId,options);
+  record.busy=false;record.status='Передан получателю';rendered='';renderTransfers();
+}
+window.NearbyGetInternetTargets = () => internetClient.targets();
+window.NearbySendInternet = async(target,file,options={}) => {
+  if(sending)throw new Error('Дождитесь завершения текущей отправки.');
+  sending=true;renderConnection();
+  const key='shell-internet:'+crypto.randomUUID(),record=keepRecord(key,{name:file.name,size:file.size,file,direction:'outgoing',device:target.name,target,localSend:true,busy:true,status:'Подготовка',received:0});
+  rendered='';renderTransfers();
+  try{if(Number.isInteger(options.nativeIndex))await registerNativeFile(key,options.nativeIndex,'shell-files');await sendInternetRecord(record,target,file,options);}
+  catch(error){record.busy=false;record.failed=true;record.status=error.message;throw error;}
+  finally{sending=false;renderConnection();rendered='';renderTransfers();}
+};
+$('internet-create').addEventListener('click',()=>{void internetClient.create(internetName()).catch(error=>{$('internet-status').textContent=error.message;});});
+$('internet-join-form').addEventListener('submit',event=>{event.preventDefault();$('internet-status').textContent='Подключаемся…';void internetClient.join($('internet-id').value.trim(),internetName()).catch(error=>{$('internet-status').textContent=error.message;});});
+$('internet-approve').addEventListener('click',async()=>{try{await internetClient.approve();$('internet-approval').hidden=true;}catch(error){$('internet-status').textContent=error.message;}});
+for(const id of ['internet-stop','internet-reject'])$(id).addEventListener('click',()=>{void internetClient.disconnect();});
+for(const [id,source]of[['internet-copy-id','internet-code'],['internet-copy-link','internet-link']])$(id).addEventListener('click',async()=>{const value=$(source).value||$(source).textContent;try{await navigator.clipboard.writeText(value);$('internet-status').textContent='Скопировано.';}catch{if($(source).select)$(source).select();$('internet-status').textContent='Выделите и скопируйте приглашение.';}});
+window.addEventListener('pagehide',()=>{clearTimeout(internetUI.expiryTimer);internetClient.close();});
 document.addEventListener('nearby-shell-transfer', event => {
   const { file, uploaded, target } = event.detail;
   const key = `shell:${target.id}:${uploaded.id}`;
