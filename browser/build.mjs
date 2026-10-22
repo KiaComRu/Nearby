@@ -18,7 +18,9 @@ const html = await readFile(root + 'index.html','utf8');
 const appRevision = createHash('sha256').update(await readFile(root + 'app.js')).digest('hex').slice(0,12);
 const styleRevision = createHash('sha256').update(await readFile(root + 'workspace.css')).digest('hex').slice(0,12);
 const localeRevision = createHash('sha256').update(await readFile(root + 'localize.js')).digest('hex').slice(0,12);
+const tabsRevision = createHash('sha256').update(await readFile(root + 'tabs.js')).digest('hex').slice(0,12);
 await writeFile(root + 'index.html',html
+  .replace(/src="tabs\.js(?:\?[^"\s]*)?"/, `src="tabs.js?v=${tabsRevision}"`)
   .replace(/src="app(?:-\d+\.\d+\.\d+)?\.js(?:\?[^"\s]*)?"/, `src="app-${version}.js?v=${appRevision}"`)
   .replace(/href="workspace\.css(?:\?[^"\s]*)?"/, `href="workspace.css?v=${styleRevision}"`)
   .replace(/(?:src|href)="(file-presentation\.(?:js|css))(?:\?[^"\s]*)?"/g, (match, name) => `${name.endsWith('.js') ? 'src' : 'href'}="${name}?v=${presentationRevision}"`)

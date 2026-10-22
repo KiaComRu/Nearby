@@ -3,6 +3,8 @@
   const languages = ['en', 'hi', 'zh-CN', 'es'];
   const supported = ['ru', ...languages];
   const rows = [
+    ['Закрыть настройки','Close settings','सेटिंग बंद करें','关闭设置','Cerrar ajustes'],
+    ['Готово','Done','हो गया','完成','Listo'],
     ["Название файла", "File name", "फ़ाइल का नाम", "文件名", "Nombre del archivo"],
     ["Размер", "Size", "आकार", "大小", "Tamaño"],
     ["Дата и время", "Date and time", "तारीख और समय", "日期和时间", "Fecha y hora"],

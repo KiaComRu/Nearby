@@ -74,8 +74,8 @@ try {
   await page.screenshot({ path: 'artifacts/nearby-pwa-offline-mobile.png' });
   await phone.setOffline(false); await page.getByRole('link', { name: 'Попробовать снова' }).click();
   await page.locator('#create').waitFor();
-  await page.locator('#connection-settings summary').click();
-  await page.locator('#connection-mode').selectOption('internet'); await page.locator('#create').click();
+  await page.locator('#open-settings').click();
+  await page.locator('#connection-mode').selectOption('internet'); await page.locator('#connection-settings [data-close-settings]').last().click(); await page.locator('#create').click();
   await page.locator('#share-link').waitFor(); const invitation = await page.locator('#share-link').inputValue();
   const recipient = await browser.newContext({ acceptDownloads: true });
   await recipient.addInitScript(() => { localStorage.setItem('nearby-site-language', 'ru'); window.showSaveFilePicker = undefined; });

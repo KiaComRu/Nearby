@@ -13,7 +13,7 @@
   <meta name="apple-mobile-web-app-title" content="Nearby">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <link rel="stylesheet" href="pwa.css">
-<script src="tabs.js?v=devices-1" defer="">
+<script src="tabs.js?v=7af7d0bd20b1" defer="">
 </script>
 <script defer="" src="pwa.js">
 </script>
@@ -22,16 +22,16 @@
   <link rel="apple-touch-icon" href="apple-touch-icon.png" sizes="180x180">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="localize.css?v=tabs-1">
-<script defer="" src="localize.js?v=159248919c01">
+<script defer="" src="localize.js?v=0f61051c40ec">
 </script>
   <script defer="" src="vendor/qrcode.js">
 </script>
 <script src="file-presentation.js?v=a48986c1f592" defer=""></script>
-<script type="module" src="app-0.5.9.js?v=b7a2a1966708">
+<script type="module" src="app-0.6.2.js?v=b7a2a1966708">
 </script>
 <script defer="" src="statistics.js?v=uses-1">
 </script>
-<link rel="stylesheet" href="workspace.css?v=e8be237777ec">
+<link rel="stylesheet" href="workspace.css?v=afe80036e7f2">
 <link rel="stylesheet" href="file-presentation.css?v=a48986c1f592">
 <!-- Nearby Metrika assets --><link rel="stylesheet" href="./metrika.css?v=741678e82f2a"><script type="module" src="./metrika.js?v=741678e82f2a"></script><!-- /Nearby Metrika assets -->
 </head>
@@ -73,18 +73,14 @@
 
 
 
-    <nav class="workspace-tabs" role="tablist" aria-label="Работа с устройствами">
+    <div class="workspace-bar"><nav class="workspace-tabs" role="tablist" aria-label="Работа с устройствами">
 <button id="tab-connection" type="button" data-pane="connection" role="tab" aria-controls="connection-pane" aria-selected="true">Подключение</button>
 <button id="tab-devices" type="button" hidden="" disabled="" data-pane="devices" role="tab" aria-controls="devices-pane" aria-selected="false">Устройства</button>
 <button id="tab-transfer" type="button" disabled="" data-pane="transfer" role="tab" aria-controls="transfer-pane" aria-selected="false">Передача</button>
-</nav>
-<div class="tab-panels">
-<section id="connection-pane" class="tab-panel" role="tabpanel" aria-labelledby="tab-connection">
-<section id="start" class="panel start-panel">
-<div id="connection-summary" class="connection-summary" hidden=""><span><span>Подключено устройств:</span> <strong id="connected-count">0</strong></span></div>
-<div class="start-settings">
-<details id="connection-settings">
-<summary>Дополнительные настройки</summary>
+</nav><button id="open-settings" class="settings-button secondary" type="button" aria-label="Дополнительные настройки" title="Дополнительные настройки" aria-haspopup="dialog" aria-controls="connection-settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 3-.6 2.2-1.8 1L4.4 6 2.9 8.6l1.6 1.7v2L2.9 14l1.5 2.6 2.2-.2 1.8 1L9 20h3l.6-2.6 1.8-1 2.2.2 1.5-2.6-1.6-1.7v-2l1.6-1.7L16.6 6l-2.2.2-1.8-1L12 3Z" transform="translate(1.5 .5)"/><circle cx="12" cy="12" r="3"/></svg></button></div>
+<dialog id="connection-settings" class="settings-dialog" aria-labelledby="settings-heading">
+<div class="settings-heading"><h2 id="settings-heading">Дополнительные настройки</h2><button type="button" class="button secondary settings-close" data-close-settings aria-label="Закрыть настройки" title="Закрыть настройки"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+<div class="settings-content">
 <label class="label" for="connection-mode">Способ подключения</label>
 <select id="connection-mode">
 <option value="auto" selected="">Автоматически — рекомендуем</option>
@@ -92,7 +88,14 @@
 <option value="internet">Через интернет — любые доступные сети</option>
 </select>
 <label class="invitation-confirmation" for="confirm-invitation"><input id="confirm-invitation" type="checkbox"><span>Подтверждать подключение по QR-коду или ссылке</span></label>
-</details>
+</div><div class="settings-footer"><button type="button" class="button primary" data-close-settings>Готово</button></div>
+</dialog>
+<div class="tab-panels">
+<section id="connection-pane" class="tab-panel" role="tabpanel" aria-labelledby="tab-connection">
+<section id="start" class="panel start-panel">
+<div id="connection-summary" class="connection-summary" hidden=""><span><span>Подключено устройств:</span> <strong id="connected-count">0</strong></span></div>
+<div class="start-settings">
+
 <div>
 <label class="label" for="device-name">Имя устройства — можно изменить</label>
 <input id="device-name" maxlength="40" autocomplete="off" placeholder="Название устройства">

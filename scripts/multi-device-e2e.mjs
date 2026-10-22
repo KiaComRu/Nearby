@@ -28,7 +28,7 @@ try {
   async function pair(host, guest, mode, hostCount, guestCount, numeric = false) {
     await host.locator('#tab-connection').click();
     if (await host.locator('#connection-mode').inputValue() !== mode) {
-      await host.locator('#connection-settings').evaluate(node => node.open = true); await host.locator('#connection-mode').selectOption(mode); await host.locator('#connection-settings').evaluate(node => node.open = false);
+      await host.locator('#open-settings').click(); await host.locator('#connection-mode').selectOption(mode); await host.locator('#connection-settings [data-close-settings]').last().click();
     }
     await host.locator('#create').click(); await host.locator('#share-link').waitFor();
     const invite = await host.locator('#share-link').inputValue(), code = await host.locator('#connection-id').textContent();
