@@ -43,8 +43,17 @@ try {
   }
   const [a,b]=pages;
   async function internet(page,name){await page.locator('#tab-connection').click();await page.locator('#connection-settings').evaluate(el=>el.open=true);await page.locator('#connection-mode').selectOption('internet');await page.locator('#internet-name').fill(name);}
-  await internet(a,'Internet PC A');await internet(b,'Internet PC B');
-  await a.locator('#internet-create').click();await a.locator('#internet-invitation').waitFor();
+  assert.ok(await a.locator('#internet-shortcuts').isVisible());assert.equal(await a.locator('#connection-settings').evaluate(el=>el.open),false);
+  assert.match(await a.locator('#connection').innerText(),/только в общей сети ПК/);
+  await a.screenshot({path:'artifacts/invitation-access-main.png'});
+  await a.locator('#invite-internet').click();await a.locator('#internet-invitation').waitFor();
+  assert.equal(await a.locator('#connection-mode').inputValue(),'internet');assert.ok(await a.locator('#desktop-lan').isHidden());
+  const internetUrl=new URL(await a.locator('#internet-link').inputValue());assert.equal(internetUrl.origin,'https://nearby.kiacom.ru');assert.equal(internetUrl.pathname,'/web/');
+  assert.ok(await a.locator('#internet-qr').evaluate(canvas=>{const box=canvas.getBoundingClientRect();return box.top>=0&&box.bottom<=innerHeight;}),'internet QR must be visible immediately after creating the invitation');
+  await a.screenshot({path:'artifacts/invitation-access-internet.png'});
+  await a.locator('#back-local').click();assert.ok(await a.locator('#internet-shortcuts').isVisible());await a.locator('#invite-internet').click();await a.locator('#internet-invitation').waitFor();
+  assert.equal(await a.locator('#internet-link').inputValue(),internetUrl.href,'returning to the existing invitation must not create a second room');
+  await b.locator('#open-internet').click();assert.ok(await b.locator('#internet-id').evaluate(input=>input===document.activeElement));await b.locator('#internet-name').fill('Internet PC B');
   const code=await a.locator('#internet-code').textContent();assert.match(code,/^\d{3}-\d{3}-\d{3}$/);
   await b.locator('#internet-id').fill(code);await b.locator('#internet-join').click();await a.locator('#internet-approval').waitFor();
   assert.ok(await a.locator('#files').isDisabled());await a.locator('#internet-approve').click();
@@ -99,4 +108,4 @@ try {
   for(const post of posts)assert.ok(!post.includes('private-'),'file names must remain encrypted over the relay');
   assert.deepEqual(errors,[]);await a.screenshot({path:'artifacts/desktop-internet.png'});
   const report={passed:true,realWinFormsWebView2:Boolean(nativePage),twoIsolatedPCs:!nativePage,rtcDisabled:!nativePage,phoneInteroperability:true,shortId:true,explorer:true,automaticSave:true,sha256:true,files,bytes,errors,testedAt:new Date().toISOString()};await writeFile('artifacts/desktop-internet'+(nativePage?'-native':'')+'-verification.json',JSON.stringify(report,null,2));console.log(report);
-}finally{if(native?.stdin.writable)native.stdin.end('stop\n');if(native&&native.exitCode===null){const timer=setTimeout(()=>native.kill(),10000);await nativeExited;clearTimeout(timer);}await nativeBrowser?.close().catch(()=>{});await browser?.close();await Promise.all(apps.map(app=>app.close()));const exited=new Promise(r=>php.once('exit',r));php.kill();await exited;assert.equal(path.dirname(directory),path.resolve(tmpdir()));await rm(directory,{recursive:true,force:true,maxRetries:20,retryDelay:250});if(harness)for(const file of [harness,harness+'.config'])await rm(file,{force:true});}
+}finally{if(native?.stdin.writable)native.stdin.end('stop\n');if(native&&native.exitCode===null){const timer=setTimeout(()=>native.kill(),10000);await nativeExited;clearTimeout(timer);}await nativeBrowser?.close().catch(()=>{});for(const context of browser?.contexts()||[])await context.unrouteAll({behavior:'ignoreErrors'});await browser?.close();await Promise.all(apps.map(app=>app.close()));const exited=new Promise(r=>php.once('exit',r));php.kill();await exited;assert.equal(path.dirname(directory),path.resolve(tmpdir()));await rm(directory,{recursive:true,force:true,maxRetries:20,retryDelay:250});if(harness)for(const file of [harness,harness+'.config'])await rm(file,{force:true});}

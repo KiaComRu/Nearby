@@ -14,8 +14,8 @@ using Microsoft.Web.WebView2.WinForms;
 
 [assembly: System.Reflection.AssemblyTitle("Nearby")]
 [assembly: System.Reflection.AssemblyDescription("Передача файлов по локальной сети")]
-[assembly: System.Reflection.AssemblyVersion("0.6.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("0.6.0.0")]
+[assembly: System.Reflection.AssemblyVersion("0.6.1.0")]
+[assembly: System.Reflection.AssemblyFileVersion("0.6.1.0")]
 #if SERVER2016
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.6.2")]
 #endif

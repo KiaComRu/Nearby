@@ -45,7 +45,7 @@ const internetClient = new window.NearbyInternet.Client({
     $('internet-expiry').textContent='Одно приглашение · 15 минут';$('internet-copy-id').disabled=false;$('internet-copy-link').disabled=false;
     void window.NearbyInternet.drawQR($('internet-qr'),invite.url).catch(()=>{$('internet-status').textContent='Используйте ID или ссылку: QR-код недоступен.';});
     clearTimeout(internetUI.expiryTimer);internetUI.expiryTimer=setTimeout(()=>{$('internet-expiry').textContent='Приглашение истекло. Создайте новое.';$('internet-copy-id').disabled=true;$('internet-copy-link').disabled=true;},Math.max(0,invite.expires*1000-Date.now()));
-    $('internet-status').textContent='Ожидаем другое устройство.';renderInternet();
+    $('internet-status').textContent='Ожидаем другое устройство.';renderInternet();$('internet-invitation').scrollIntoView({block:'nearest'});
   },
   onPeerRequest:(connection,name)=>{$('internet-peer').textContent=name;$('internet-approval').hidden=false;},
   onApproved:()=>{internetUI.invitation=null;clearTimeout(internetUI.expiryTimer);$('internet-approval').hidden=true;$('internet-invitation').hidden=true;},
@@ -65,6 +65,7 @@ const internetClient = new window.NearbyInternet.Client({
 
 function renderInternet() {
   if(!state)return;
+  $('internet-shortcuts').hidden=!state.admin||$('connection-mode').value==='internet';
   if(!$('internet-name').value)$('internet-name').value=state.computerName||'Компьютер';
   const pending=internetClient.pending,busy=Boolean(pending||internetClient.working)||!state.admin;
   $('internet-create').disabled=busy;$('internet-join').disabled=busy;$('internet-id').disabled=busy;$('internet-name').disabled=busy;
@@ -703,9 +704,19 @@ $('copy-address').addEventListener('click', async () => {
   try { await navigator.clipboard.writeText($('share-address').value); message('Ссылка с PIN скопирована. Вставьте её в Nearby на другом ПК.'); }
   catch { $('share-address').focus(); $('share-address').select(); message('Ссылка выделена. Нажмите Ctrl+C, чтобы скопировать.'); }
 });
-$('connection-mode').addEventListener('change', () => {
-  const internet = $('connection-mode').value === 'internet';
+function setConnectionMode(mode) {
+  $('connection-mode').value=mode;
+  const internet = mode === 'internet';
   $('desktop-lan').hidden = internet; $('internet-option').hidden = !internet;
+  renderInternet();
+}
+$('connection-mode').addEventListener('change', () => setConnectionMode($('connection-mode').value));
+$('back-local').addEventListener('click',()=>setConnectionMode('lan'));
+$('open-internet').addEventListener('click',()=>{setConnectionMode('internet');$('internet-id').focus();});
+$('invite-internet').addEventListener('click',()=>{
+  setConnectionMode('internet');
+  if(!internetClient.pending&&!internetClient.working)void internetClient.create(internetName()).catch(error=>{$('internet-status').textContent=error.message;});
+  else if(internetUI.invitation)$('internet-invitation').scrollIntoView({block:'nearest'});
 });
 function internetName() { return $('internet-name').value.trim().slice(0,40) || state?.computerName || 'Компьютер'; }
 async function sendInternetRecord(record,target,file,options) {

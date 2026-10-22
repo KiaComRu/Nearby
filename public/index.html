@@ -84,6 +84,7 @@
 </select>
 <p>Локальная сеть — для устройств рядом. Интернет — для разных Wi-Fi и мобильных сетей.</p><label class="invitation-confirmation"><input id="confirm-invitation" type="checkbox"> Подтверждать подключение по QR-коду или ссылке</label>
 </details>
+<div id="internet-shortcuts" class="internet-shortcuts" hidden><p>Устройства в разных сетях?</p><button id="invite-internet" type="button">Пригласить через интернет</button><button id="open-internet" type="button" class="secondary">Подключиться по интернет-ID</button></div>
 <div id="desktop-lan" class="desktop-lan">
 <section id="join" class="panel" hidden="">
       <div class="step">01 / ПОДКЛЮЧЕНИЕ</div>
@@ -191,8 +192,8 @@
 <section id="connection" class="panel connection" hidden="">
         <div class="connection-info">
 <div class="step">01 / ПОДКЛЮЧЕНИЕ</div>
-<h2>Пригласить</h2>
-<p>На втором устройстве откройте QR-код или ссылку с PIN.</p>
+<h2>Пригласить в этой сети</h2>
+<p>Этот QR и PIN работают только в общей сети ПК. Для другого Wi-Fi или мобильной сети нажмите «Пригласить через интернет» выше.</p>
 <label for="address">Адрес этого компьютера</label>
 <select id="address">
 </select>
@@ -206,8 +207,8 @@
 </div>
 </div>
 <div class="qr">
-<img id="qr" alt="QR-код для подключения второго устройства" width="200" height="200">
-<span>Для телефона · HTTP в доверенной сети</span>
+<img id="qr" alt="Локальный QR-код: только в общей сети этого ПК" width="200" height="200">
+<span>Только в сети этого ПК · HTTP</span>
 </div>
       </section>
 </div>
@@ -215,7 +216,7 @@
 </div>
 <section class="panel internet-mode" aria-labelledby="internet-heading" id="internet-option" hidden="">
 <div class="step">УСТРОЙСТВА В РАЗНЫХ СЕТЯХ</div>
-<h2>Подключение через интернет</h2>
+<div class="internet-heading"><h2 id="internet-heading">Подключение через интернет</h2><button id="back-local" type="button" class="secondary">К локальной сети</button></div>
 <p>Подключите ПК или телефон из любой сети по ID, ссылке или QR. Файлы зашифрованы, до 100 МиБ на файл. Полученные файлы сохраняются в папку Nearby.</p>
 <label for="internet-name">Имя этого компьютера</label><input id="internet-name" maxlength="40" autocomplete="off" placeholder="Имя компьютера">
 <div class="internet-actions">
