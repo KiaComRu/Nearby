@@ -31,8 +31,9 @@ try {
   assert.ok(await client.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   await client.screenshot({ path: 'artifacts/nearby-devices-mobile.png', fullPage: true });
   await client.setViewportSize({ width: 1280, height: 900 });
-  assert.equal(await client.locator('#pc-connect').isVisible(), true);
+  assert.equal(await client.locator('#pc-connect').isVisible(), false,'Manual LAN fields are hidden in automatic mode');
   await device.getByRole('button', { name: 'Подключиться', exact: true }).click();
+  assert.equal(await client.locator('#pc-connect').isVisible(), true,'A legacy discovery target opens its PIN form');
   await client.locator('#pc-diagnostic-state[data-code="ready"]').waitFor({ timeout: 12000 });
   assert.equal(await client.locator('#pc-pin').inputValue(), '', 'Discovery does not distribute the PIN');
   assert.match(await client.locator('#pc-address').inputValue(), memoryBus ? /^http:\/\/127\.0\.0\.1:/ : /^http:\/\/(10\.|172\.|192\.168\.)/);

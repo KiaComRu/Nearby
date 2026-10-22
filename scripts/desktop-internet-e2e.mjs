@@ -37,24 +37,25 @@ try {
   for(const app of apps){
     if(app===apps[0]&&nativePage){nativePage.on('pageerror',e=>errors.push(e.message));pages.push(nativePage);continue;}
     const context=await browser.newContext({acceptDownloads:true,viewport:{width:1366,height:900}}),origin=new URL(app.adminUrl).origin;
-    await context.addInitScript(()=>{window.RTCPeerConnection=undefined;});
+    if(!nativePage)await context.addInitScript(()=>{window.RTCPeerConnection=undefined;});
     await context.route('**/*',route=>new URL(route.request().url()).origin===origin?route.continue():route.abort());
     context.on('request',r=>{if(r.url().endsWith('/api/internet'))posts.push(r.postData());});
     const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));await page.goto(app.adminUrl);await page.locator('#workspace').waitFor();pages.push(page);
   }
   const [a,b]=pages;
   async function internet(page,name){await selectPane(page,'connection');await openSettings(page);await page.locator('#connection-mode').selectOption('internet');await page.locator('#connection-settings [data-close-settings]').last().click();await page.locator('#internet-name').fill(name);}
-  assert.ok(await a.locator('#internet-shortcuts').isVisible());assert.equal(await a.locator('#connection-settings').evaluate(el=>el.open),false);
-  assert.match(await a.locator('#connection').innerText(),/только в общей сети ПК/);
+  assert.equal(await a.locator('#connection-mode').inputValue(),'auto');assert.equal(await a.locator('#connection-settings').evaluate(el=>el.open),false);
+  assert.ok(await a.locator('#connection').isHidden());assert.ok(await a.locator('#internet-option').isVisible());
   await a.screenshot({path:'artifacts/invitation-access-main.png'});
-  await a.locator('#invite-internet').click();await a.locator('#internet-invitation').waitFor();
-  assert.equal(await a.locator('#connection-mode').inputValue(),'internet');assert.ok(await a.locator('#desktop-lan').isHidden());
+  await a.locator('#internet-create').click();await a.locator('#internet-invitation').waitFor();
+  assert.equal(await a.locator('#connection-mode').inputValue(),'auto');assert.ok(await a.locator('#qr').isHidden());
   const internetUrl=new URL(await a.locator('#internet-link').inputValue());assert.equal(internetUrl.origin,'https://nearby.kiacom.ru');assert.equal(internetUrl.pathname,'/web/');
   assert.ok(await a.locator('#internet-qr').evaluate(canvas=>{const box=canvas.getBoundingClientRect();return box.top>=0&&box.bottom<=innerHeight;}),'internet QR must be visible immediately after creating the invitation');
   await a.screenshot({path:'artifacts/invitation-access-internet.png'});
-  await a.locator('#back-local').click();assert.ok(await a.locator('#internet-shortcuts').isVisible());await a.locator('#invite-internet').click();await a.locator('#internet-invitation').waitFor();
+  assert.equal(new URLSearchParams(internetUrl.hash.slice(1)).get('mode'),'auto');
+  await openSettings(a);await a.locator('#connection-mode').selectOption('lan');await a.locator('#connection-settings [data-close-settings]').last().click();assert.ok(await a.locator('#internet-shortcuts').isVisible());await a.locator('#invite-internet').click();await a.locator('#internet-invitation').waitFor();
   assert.equal(await a.locator('#internet-link').inputValue(),internetUrl.href,'returning to the existing invitation must not create a second room');
-  await b.locator('#open-internet').click();assert.ok(await b.locator('#internet-id').evaluate(input=>input===document.activeElement));await b.locator('#internet-name').fill('Internet PC B');
+  await b.locator('#internet-id').focus();assert.ok(await b.locator('#internet-id').evaluate(input=>input===document.activeElement));await b.locator('#internet-name').fill('Internet PC B');
   const code=await a.locator('#internet-code').textContent();assert.match(code,/^\d{3}-\d{3}-\d{3}$/);
   await b.locator('#internet-id').fill(code);await b.locator('#internet-join').click();await a.locator('#internet-approval').waitFor();
   assert.ok(await a.locator('#files').isDisabled());await a.locator('#internet-approve').click();
@@ -91,7 +92,7 @@ try {
   if(nativePage){const selected=path.join(directory,'private-explorer.txt');await writeFile(selected,'Explorer works');const cdp=await a.context().newCDPSession(a),doc=await cdp.send('DOM.getDocument'),node=await cdp.send('DOM.querySelector',{nodeId:doc.root.nodeId,selector:'#shell-files'});await cdp.send('DOM.setFileInputFiles',{nodeId:node.nodeId,files:[selected]});}
   else await a.locator('#shell-files').setInputFiles({name:'private-explorer.txt',mimeType:'text/plain',buffer:Buffer.from('Explorer works')});
   await a.evaluate(()=>document.dispatchEvent(new Event('nearby-shell-selection')));await a.locator('#shell-send').waitFor();
-  await a.locator('#shell-target').selectOption({label:'Internet PC B · интернет'});await a.locator('#shell-start').click();await b.locator('#incoming .file-row').filter({hasText:'private-explorer.txt'}).getByText('Получено и сохранено',{exact:true}).waitFor({state:'attached',timeout:60000});await a.locator('#shell-start').waitFor({state:'visible'});files++;bytes+=14;
+  await a.locator('#shell-target').selectOption(await a.locator('#shell-target option').filter({hasText:'Internet PC B'}).getAttribute('value'));await a.locator('#shell-start').click();await b.locator('#incoming .file-row').filter({hasText:'private-explorer.txt'}).getByText('Получено и сохранено',{exact:true}).waitFor({state:'attached',timeout:60000});await a.locator('#shell-start').waitFor({state:'visible'});files++;bytes+=14;
   await a.locator('#shell-close').click();
   if(nativePage){const row=a.locator('#queue .file-row').filter({hasText:'private-explorer.txt'});await row.getByRole('button',{name:'Открыть',exact:true}).click();await a.waitForTimeout(300);assert.ok((await readFile(path.join(directory,'opened.txt'),'utf8')).includes(path.join(directory,'private-explorer.txt')));}
   // A Windows guest can also accept the existing web application's automatic invitation.

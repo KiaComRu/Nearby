@@ -1,4 +1,4 @@
-import {selectPane,openSettings} from './web-navigation.mjs';
+import {selectPane,openSettings,selectDesktopLan} from './web-navigation.mjs';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 import { randomBytes, createHash } from 'node:crypto';
@@ -42,6 +42,9 @@ try {
   const client = await page(await browser.newContext({ viewport: { width: 1366, height: 768 }, acceptDownloads: true }), second.adminUrl);
   await owner.locator('#workspace').waitFor(); await client.locator('#workspace').waitFor();
   assert.equal(await owner.locator('#tab-transfer').isDisabled(), true);
+  assert.equal(await owner.locator('#connection-mode').inputValue(),'auto');
+  await fit(owner,'desktop automatic');
+  for(const page of [owner,client])await selectDesktopLan(page);
   for (const viewport of [{ width: 1366, height: 768 }, { width: 760, height: 560 }, { width: 390, height: 844 }]) {
     await owner.setViewportSize(viewport); await fit(owner, 'desktop connection');
     const gear=await owner.locator('#open-settings').boundingBox(),bar=await owner.locator('.workspace-bar').boundingBox(),tab=await owner.locator('#tab-connection').boundingBox();
@@ -56,7 +59,7 @@ try {
   await owner.screenshot({ path: 'artifacts/compact-desktop-connection.png' });
   await openSettings(owner);
   await owner.locator('#connection-mode').selectOption('internet');await owner.locator('#connection-settings [data-close-settings]').last().click();await fit(owner, 'desktop internet');
-  assert.ok(await owner.locator('#internet-option').isVisible()); assert.ok(!await owner.locator('#desktop-lan').isVisible());
+  assert.ok(await owner.locator('#internet-option').isVisible()); assert.ok(await owner.locator('#connection').isHidden());
   await openSettings(owner);await owner.locator('#connection-mode').selectOption('lan');await owner.locator('#connection-settings [data-close-settings]').first().click();
   await client.locator('#pc-address').fill(`http://127.0.0.1:${first.port}/#pin=${first.pin}`);
   await client.locator('#pc-connect-submit').click();

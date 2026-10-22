@@ -73,7 +73,7 @@ try {
   await client.setViewportSize({ width: 390, height: 844 }); assert.ok(await client.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   await client.screenshot({ path: 'artifacts/nearby-trusted-mobile.png', fullPage: true });
   await client.locator('#tab-connection').click(); await client.locator('#saved-devices').evaluate(node => { node.open = true; }); await saved.getByRole('button', { name: 'Забыть устройство' }).click();
-  await client.locator('#connection').waitFor();
+  await client.locator('#internet-option').waitFor();
   await client.waitForFunction(() => document.querySelectorAll('#trusted-devices [data-fingerprint]').length === 0);
   await host.waitForFunction(() => document.querySelectorAll('#trusted-devices [data-fingerprint]').length === 0);
   await host.waitForFunction(() => document.querySelector('#files').disabled);

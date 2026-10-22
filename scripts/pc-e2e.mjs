@@ -5,6 +5,7 @@ import path from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { createApp } from '../server.mjs';
+import {selectDesktopLan} from './web-navigation.mjs';
 const directory = await mkdtemp(path.join(tmpdir(), 'nearby-pc-ui-'));
 const applications = []; let browser;
 try {
@@ -20,9 +21,9 @@ try {
     await page.locator('#workspace').waitFor();
     assert.equal(await page.locator('#transfer-workspace').isVisible(), false, 'Transfers stay hidden before a connection');
     assert.equal(await page.locator('#connection-status').isVisible(), false);
-    const web = page.locator('#internet-option a').first();
-    assert.equal(await web.getAttribute('href'), 'https://nearby.kiacom.ru/web/');
-    assert.equal(await web.getAttribute('target'), '_blank');
+    assert.equal(await page.locator('#connection-mode').inputValue(),'auto');
+    assert.ok(await page.locator('#internet-option').isVisible());
+    await selectDesktopLan(page);
   }
   await client.locator('#tab-connection').click();
   await client.locator('#pc-connect-form').waitFor();
@@ -37,6 +38,7 @@ try {
   assert.equal(new URL(client.url()).port, String(second.port), 'In-app navigation stays on its own engine');
   await client.reload();
   await client.waitForFunction(() => !document.querySelector('#pc-connected').hidden);
+  await selectDesktopLan(client);
   const bytes = randomBytes(1024 * 1024 + 17);
   const digest = data => createHash('sha256').update(data).digest('hex');
   for (const [name, data] of [['ПК-на-ПК.bin', bytes], ['empty.txt', Buffer.alloc(0)]]) {

@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import net from 'node:net';
 import assert from 'node:assert/strict';
 import { checkFilePresentation } from './check-file-presentation.mjs';
+import {selectDesktopLan} from './web-navigation.mjs';
 const directory = await mkdtemp(path.join(tmpdir(), 'nearby-file-actions-native-'));
 const port = await new Promise(resolve => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); });
 const stage = path.resolve('dist/windows-x64'), harness = path.join(stage, 'DesktopParityNativeHarness.exe');
@@ -35,7 +36,7 @@ try {
   const imageDownload=guest.waitForEvent('download');await cdp.send('DOM.setFileInputFiles',{nodeId:node.nodeId,files:[selectedImage]});await imageDownload;
   await checkFilePresentation(page,page.locator('#queue .file-row').filter({hasText:'selected-image.webp'}),{image:true});
   remote = await createApp({host:'127.0.0.1',port:0,storage:path.join(directory,'remote'),statistics:false,trustedLan:false,discovery:false}); const remoteOrigin=`http://127.0.0.1:${remote.port}`;
-  await page.locator('#tab-connection').click(); await page.locator('#pc-address').fill(remoteOrigin+'/#pin='+remote.pin); await page.locator('#pc-connect-submit').click(); await page.locator('#tab-devices').waitFor();
+  await page.locator('#tab-connection').click(); await selectDesktopLan(page); await page.locator('#pc-address').fill(remoteOrigin+'/#pin='+remote.pin); await page.locator('#pc-connect-submit').click(); await page.locator('#tab-devices').waitFor();
   const targets = await (await fetch(remoteOrigin+'/api/send-targets',{headers:{Authorization:`Bearer ${remote.adminToken}`}})).json();
   const body = Buffer.from('Received through real Windows WebView2.'); const sent = await fetch(remoteOrigin+`/api/shares?recipient=${targets.targets[0].id}&name=from-peer.txt&size=${body.length}`,{method:'POST',headers:{Authorization:`Bearer ${remote.adminToken}`},body}); const share=await sent.json(); assert.equal(sent.status,201);
   try { await page.waitForFunction(id=>nativeFiles.has(id),share.id); }

@@ -49,7 +49,7 @@
       $('shell-target').replaceChildren();
       const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = targets.length ? 'Выберите устройство' : 'Нет подключённых устройств'; $('shell-target').append(placeholder);
       for (const target of targets) {
-        const option = document.createElement('option'); option.value = target.id; option.textContent = `${target.name} · ${target.kind === 'internet' ? 'интернет' : target.secure ? 'TLS' : 'локальная сеть'}`; $('shell-target').append(option);
+        const option = document.createElement('option'); option.value = target.id; option.textContent = `${target.name} · ${target.kind === 'internet' ? target.transport === 'direct' ? 'напрямую' : 'интернет' : target.secure ? 'TLS' : 'локальная сеть'}`; $('shell-target').append(option);
       }
       // Never substitute a new device when a previously selected one disconnects.
       if (targets.some(target => target.id === selected)) $('shell-target').value = selected;

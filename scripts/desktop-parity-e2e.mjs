@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomBytes, createHash } from 'node:crypto';
 import { checkFilePresentation } from './check-file-presentation.mjs';
+import {selectDesktopLan} from './web-navigation.mjs';
 const directory = await mkdtemp(path.join(tmpdir(), 'nearby-desktop-parity-'));
 const applications = [], opened = [], errors = [], downloads = new Map();
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -19,6 +20,7 @@ try {
   const origin = app => `http://127.0.0.1:${app.port}`;
   const request = (app, url, method = 'GET', data) => fetch(origin(app) + url, { method, headers: { Authorization: `Bearer ${app.adminToken}`, ...(data ? { 'Content-Type': 'application/json' } : {}) }, body: data ? JSON.stringify(data) : undefined });
   for (const [page, name] of [[second, 'Second PC'], [third, 'Third PC']]) {
+    await selectDesktopLan(page);
     await page.locator('#pc-address').fill(origin(firstApp) + '/#pin=' + firstApp.pin); await page.locator('#pc-device').fill(name); await page.locator('#pc-connect-submit').click(); await page.waitForFunction(() => !document.querySelector('#pc-connected').hidden && !document.querySelector('#files').disabled);
   }
   await owner.locator('#tab-devices').waitFor();

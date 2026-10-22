@@ -35,6 +35,7 @@ const nativeBridge = window.chrome?.webview;
 let internetBufferedBytes = 0;
 const internetUI = {invitation:null,liveSignature:'',expiryTimer:null};
 const internetRecord = (connection,id) => [...records.values()].find(record=>record.internetRoom===connection.id&&record.internetFileId===id);
+const channelName = target => !target.ready ? 'Восстанавливаем связь' : target.transport === 'direct' ? 'WebRTC · напрямую' : 'Интернет · сквозное шифрование';
 const internetClient = new window.NearbyInternet.Client({
   request:(action,extra,session)=>api('/api/internet',{method:'POST',data:{action,...(session?{room:session.room,token:session.token}:{}),...extra}}),
   onChange:()=>{if(state){targets=[...lanTargets,...internetClient.targets()];renderConnection();renderInternet();}},
@@ -49,7 +50,7 @@ const internetClient = new window.NearbyInternet.Client({
   },
   onPeerRequest:(connection,name)=>{$('internet-peer').textContent=name;$('internet-approval').hidden=false;},
   onApproved:()=>{internetUI.invitation=null;clearTimeout(internetUI.expiryTimer);$('internet-approval').hidden=true;$('internet-invitation').hidden=true;},
-  onReady:connection=>{internetUI.invitation=null;clearTimeout(internetUI.expiryTimer);$('internet-approval').hidden=true;$('internet-status').textContent=`Подключено через интернет: ${connection.peerName}.`;},
+  onReady:connection=>{internetUI.invitation=null;clearTimeout(internetUI.expiryTimer);$('internet-approval').hidden=true;$('internet-status').textContent=`${connection.transport==='direct'?'Подключено напрямую':'Подключено через интернет'}: ${connection.peerName}.`;},
   onOffer:(connection,spec,link)=>{void receiveInternetFile(connection,spec,link);},
   onProgress:(connection,id,bytes,direction)=>{
     const record=internetRecord(connection,id);if(record){record.received=bytes;record.status=`${direction==='sending'?'Отправляем':'Принимаем'}: ${sizes(bytes)} / ${sizes(record.size)}`;rendered='';renderTransfers();}
@@ -65,7 +66,13 @@ const internetClient = new window.NearbyInternet.Client({
 
 function renderInternet() {
   if(!state)return;
-  $('internet-shortcuts').hidden=!state.admin||$('connection-mode').value==='internet';
+  const mode=$('connection-mode').value;
+  $('internet-shortcuts').hidden=!state.admin||mode!=='lan';
+  $('internet-option').hidden=!state.admin||mode==='lan';
+  $('back-local').hidden=mode==='auto';
+  $('invitation-help').textContent=mode==='internet'
+    ? 'Приглашение использует зашифрованный интернет-канал. До 100 МиБ на файл; принятые файлы сохраняются в папку Nearby. Настройка применяется к новым приглашениям.'
+    : 'Подключите ПК или телефон по ID, ссылке или QR. Nearby выбирает прямое соединение, а если оно недоступно — зашифрованный интернет-канал. Для создания приглашения нужен доступ к сайту. До 100 МиБ на файл; принятые файлы сохраняются в папку Nearby.';
   if(!$('internet-name').value)$('internet-name').value=state.computerName||'Компьютер';
   const pending=internetClient.pending,busy=Boolean(pending||internetClient.working)||!state.admin;
   $('internet-create').disabled=busy;$('internet-join').disabled=busy;$('internet-id').disabled=busy;$('internet-name').disabled=busy;
@@ -74,7 +81,7 @@ function renderInternet() {
   const connected=internetClient.targets(),signature=JSON.stringify(connected);
   if(signature!==internetUI.liveSignature){
     internetUI.liveSignature=signature;$('internet-connections').replaceChildren();
-    for(const target of connected){const item=document.createElement('div');item.className='internet-connected';const name=document.createElement('span');name.textContent=target.name+(target.ready?' · интернет':' · восстанавливаем связь');item.append(name,button('Отключить',()=>internetClient.disconnect(target),true));$('internet-connections').append(item);}
+    for(const target of connected){const item=document.createElement('div');item.className='internet-connected';const name=document.createElement('span');name.textContent=target.name+' · '+channelName(target);item.append(name,button('Отключить',()=>internetClient.disconnect(target),true));$('internet-connections').append(item);}
   }
 }
 async function receiveInternetFile(connection,spec,link) {
@@ -240,7 +247,7 @@ function renderDevices() {
       const radio = document.createElement('input'); radio.type = 'radio'; radio.name = 'send-target'; radio.value = target.id; radio.checked = target.id === selectedTargetId; radio.disabled = sending;
       radio.addEventListener('change', () => { selectedTargetId = target.id; selectionLost = false; renderConnection(); });
       const info = document.createElement('span'), name = document.createElement('strong'), transport = document.createElement('small');
-      name.textContent = target.name; name.className = 'device-name'; transport.textContent = target.kind === 'internet' ? target.ready ? 'Интернет · сквозное шифрование' : 'Интернет · восстанавливаем связь' : target.secure ? 'TLS · защищённое соединение' : 'Локальная сеть'; info.append(name, transport); card.append(radio, info); $('device-list').append(card);
+      name.textContent = target.name; name.className = 'device-name'; transport.textContent = target.kind === 'internet' ? channelName(target) : target.secure ? 'TLS · защищённое соединение' : 'Локальная сеть'; info.append(name, transport); card.append(radio, info); $('device-list').append(card);
     }
   }
   const target = selectedTarget();
@@ -267,18 +274,17 @@ function showTrustedPanel() {
 
 function render() {
   renderConnection();
-  renderInternet();
-  $('connection-mode').querySelector('option[value=internet]').disabled = !state.admin;
-  if (!state.admin && $('connection-mode').value === 'internet') { $('connection-mode').value = 'lan'; $('desktop-lan').hidden = false; $('internet-option').hidden = true; }
+  for(const mode of ['auto','internet'])$('connection-mode').querySelector(`option[value=${mode}]`).disabled=!state.admin;
+  setConnectionMode(state.admin?$('connection-mode').value:'lan');
   $('join').hidden = true; $('workspace').hidden = false;
-  $('connection').hidden = !state.admin;
+  $('connection').hidden = !state.admin || $('connection-mode').value!=='lan';
   $('received-location').hidden = !(state.admin || state.localAdmin) || !state.receivedDirectory;
   $('pc-connect').hidden = !(state.admin || state.localAdmin);
   $('connected-devices').replaceChildren();
   const devices = targets;
   for (const device of devices) {
     const item = document.createElement('div'); item.className = 'connected-device';
-    item.textContent = `${device.name} · ${device.kind === 'internet' ? 'Интернет' : device.secure ? 'TLS' : 'Локальная сеть'}`;
+    item.textContent = `${device.name} · ${device.kind === 'internet' ? channelName(device) : device.secure ? 'TLS' : 'Локальная сеть'}`;
     $('connected-devices').append(item);
   }
   if (!devices.length) empty($('connected-devices'), 'Пока нет подключений.');
@@ -506,6 +512,7 @@ async function refreshDiscovery() {
         }
         const changed = $('pc-address').value !== origin;
         $('pc-address').value = origin; if (changed) $('pc-pin').value = '';
+        setConnectionMode('lan');
         joinMode = true; render(); $('pc-connect').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
         $('pc-pin').focus(); await diagnoseAddress();
       }));
@@ -706,15 +713,17 @@ $('copy-address').addEventListener('click', async () => {
 });
 function setConnectionMode(mode) {
   $('connection-mode').value=mode;
-  const internet = mode === 'internet';
-  $('desktop-lan').hidden = internet; $('internet-option').hidden = !internet;
+  document.body.dataset.connectionMode=mode;
+  $('desktop-lan').hidden=false;
+  $('connection').hidden=!state?.admin||mode!=='lan';
+  document.querySelector('.connection-actions').hidden=mode!=='lan'&&!peerMode;
   renderInternet();
 }
 $('connection-mode').addEventListener('change', () => setConnectionMode($('connection-mode').value));
-$('back-local').addEventListener('click',()=>setConnectionMode('lan'));
-$('open-internet').addEventListener('click',()=>{setConnectionMode('internet');$('internet-id').focus();});
+$('back-local').addEventListener('click',()=>setConnectionMode('auto'));
+$('open-internet').addEventListener('click',()=>{setConnectionMode('auto');$('internet-id').focus();});
 $('invite-internet').addEventListener('click',()=>{
-  setConnectionMode('internet');
+  setConnectionMode('auto');
   if(!internetClient.pending&&!internetClient.working)void internetClient.create(internetName()).catch(error=>{$('internet-status').textContent=error.message;});
   else if(internetUI.invitation)$('internet-invitation').scrollIntoView({block:'nearest'});
 });
@@ -736,7 +745,7 @@ window.NearbySendInternet = async(target,file,options={}) => {
   catch(error){record.busy=false;record.failed=true;record.status=error.message;throw error;}
   finally{sending=false;renderConnection();rendered='';renderTransfers();}
 };
-$('internet-create').addEventListener('click',()=>{void internetClient.create(internetName()).catch(error=>{$('internet-status').textContent=error.message;});});
+$('internet-create').addEventListener('click',()=>{void internetClient.create(internetName(),{mode:$('connection-mode').value==='internet'?'internet':'auto'}).catch(error=>{$('internet-status').textContent=error.message;});});
 $('internet-join-form').addEventListener('submit',event=>{event.preventDefault();$('internet-status').textContent='Подключаемся…';void internetClient.join($('internet-id').value.trim(),internetName()).catch(error=>{$('internet-status').textContent=error.message;});});
 $('internet-approve').addEventListener('click',async()=>{try{await internetClient.approve();$('internet-approval').hidden=true;}catch(error){$('internet-status').textContent=error.message;}});
 for(const id of ['internet-stop','internet-reject'])$(id).addEventListener('click',()=>{void internetClient.disconnect();});

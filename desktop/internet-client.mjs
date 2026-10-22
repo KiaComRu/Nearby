@@ -10,7 +10,7 @@ export class Client {
   emit(name,...args) { return this.options[name]?.(...args); }
   changed() { this.emit('onChange'); }
   busy() { return [...this.connections.values()].some(connection=>connection.link?.incoming || connection.link?.outgoing); }
-  targets() { return [...this.connections.values()].filter(connection=>connection.hasConnected&&!connection.stopped).map(connection=>({id:'internet:'+connection.id,kind:'internet',name:connection.peerName||'Интернет-устройство',secure:true,ready:connection.ready,maxSize:Math.min(MEMORY_LIMIT,connection.link?.peerLimit||MEMORY_LIMIT)})); }
+  targets() { return [...this.connections.values()].filter(connection=>connection.hasConnected&&!connection.stopped).map(connection=>({id:'internet:'+connection.id,kind:'internet',name:connection.peerName||'Устройство',transport:connection.transport,secure:true,ready:connection.ready,maxSize:Math.min(MEMORY_LIMIT,connection.link?.peerLimit||MEMORY_LIMIT)})); }
   connection(target) { return this.connections.get(target.id.replace(/^internet:/,'')); }
   async request(action,extra={},session=null) { return this.options.request(action,extra,session); }
   register(session,peerName='') {
@@ -40,17 +40,18 @@ export class Client {
     });
     connection.peerName=peerName;this.connections.set(connection.id,connection);this.pending=connection;return connection;
   }
-  async create(name) {
+  async create(name,{mode='auto'}={}) {
+    if(!['auto','internet'].includes(mode))throw new Error('Неизвестный режим приглашения.');
     if(this.working||this.pending||this.closed)throw new Error('Сначала завершите текущее приглашение.');
     if(this.connections.size>=8)throw new Error('Подключено слишком много устройств.');
     this.working=true;this.changed();
     try {
       const exchange=await invitationKeyExchange();
-      const result=await this.request('create',{name,mode:'internet',shortId:true,idPublicKey:exchange.publicKey});
-      const session={room:result.room,token:result.token,role:'host',mode:'internet',relaySecret:newRelaySecret(),idPrivateKey:exchange.privateKey};
+      const result=await this.request('create',{name,mode,shortId:true,idPublicKey:exchange.publicKey});
+      const session={room:result.room,token:result.token,role:'host',mode,relaySecret:newRelaySecret(),idPrivateKey:exchange.privateKey};
       if(this.closed){void this.request('close',{},session);return null;}
-      if(result.mode!=='internet'||result.shortId!==true||!/^\d{9}$/.test(result.id||''))throw new Error('Интернет-сервер Nearby нужно обновить.');
-      const connection=this.register(session),url=new URL(web);url.hash=new URLSearchParams({room:result.room,key:result.invite,mode:'internet',secret:session.relaySecret}).toString();
+      if(result.mode!==mode||result.shortId!==true||!/^\d{9}$/.test(result.id||''))throw new Error('Сервер Nearby нужно обновить.');
+      const connection=this.register(session),url=new URL(web);url.hash=new URLSearchParams({room:result.room,key:result.invite,mode,secret:session.relaySecret}).toString();
       this.emit('onInvitation',connection,{id:formatInvitationId(result.id),url:url.href,expires:result.inviteExpires});
       connection.start();return connection;
     } finally {this.working=false;this.changed();}

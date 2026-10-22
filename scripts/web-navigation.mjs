@@ -8,3 +8,6 @@ export async function selectPane(page,pane) {
 export async function openSettings(page) {
   await page.locator(await page.locator('#mobile-navigation').isVisible()?'#mobile-settings':'#open-settings').click();
 }
+export async function selectDesktopLan(page) {
+  await openSettings(page);await page.locator('#connection-mode').selectOption('lan');await page.locator('#connection-settings [data-close-settings]').last().click();
+}

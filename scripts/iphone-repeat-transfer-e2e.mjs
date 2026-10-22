@@ -45,7 +45,7 @@ try{
     const pc=await pcContext.newPage(),phone=await phoneContext.newPage();
     for(const page of [pc,phone])page.on('pageerror',e=>errors.push(e.message));
     if(kind==='windows-relay'){
-      await pc.goto(app.adminUrl);await pc.locator('#invite-internet').click();await pc.locator('#internet-link').waitFor();
+      await pc.goto(app.adminUrl);await pc.locator('#internet-create').click();await pc.locator('#internet-link').waitFor();
       await phone.goto((await pc.locator('#internet-link').inputValue()).replace('https://nearby.kiacom.ru/web/',base));
       await pc.locator('#internet-approve').click();
     }else{
