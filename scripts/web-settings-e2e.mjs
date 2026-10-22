@@ -1,3 +1,4 @@
+import {openSettings} from './web-navigation.mjs';
 import assert from 'node:assert/strict';
 import {chromium} from 'playwright';
 import {spawn} from 'node:child_process';
@@ -18,19 +19,26 @@ try{
       await context.route('**/*',route=>new URL(route.request().url()).origin===new URL(base).origin?route.continue():route.abort());
       const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));await page.goto(base+'?lang='+locale);await page.waitForFunction(language=>document.documentElement.lang===language,locale);
       await page.evaluate(()=>{window.NearbyWorkspace.setDevices(2);window.NearbyWorkspace.selectTab('devices');});
-      const gear=await page.locator('#open-settings').boundingBox(),bar=await page.locator('.workspace-bar').boundingBox(),tab=await page.locator('#tab-connection').boundingBox();
-      assert.ok(Math.abs(gear.x+gear.width-bar.x-bar.width)<2);assert.ok(Math.abs(gear.y+gear.height/2-tab.y-tab.height/2)<2);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
-      assert.equal(await page.locator('#open-settings').getAttribute('aria-label'),title);await page.locator('#open-settings').click();assert.ok(await page.locator('#connection-settings').evaluate(dialog=>dialog.matches(':modal')));assert.equal(await page.locator('#settings-heading').textContent(),title);assert.equal(await page.locator('#connection-settings summary').count(),0);
+      const mobile=await page.locator('#mobile-navigation').isVisible(),gearSelector=mobile?'#mobile-settings':'#open-settings';const gear=await page.locator(gearSelector).boundingBox(),bar=await page.locator(mobile?'#mobile-navigation':'.workspace-bar').boundingBox(),tab=await page.locator(mobile?'#mobile-connection':'#tab-connection').boundingBox();
+      assert.ok(Math.abs(gear.x+gear.width-bar.x-bar.width)<(mobile?12:2));assert.ok(Math.abs(gear.y+gear.height/2-tab.y-tab.height/2)<2);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+      if(!mobile)assert.equal(await page.locator('#open-settings').getAttribute('aria-label'),title);await openSettings(page);assert.ok(await page.locator('#connection-settings').evaluate(dialog=>dialog.matches(':modal')));assert.equal(await page.locator('#settings-heading').textContent(),title);assert.equal(await page.locator('#connection-settings summary').count(),0);
       const box=await page.locator('#connection-settings').boundingBox();assert.ok(box.x>=0&&box.y>=0&&box.x+box.width<=width+1&&box.y+box.height<=844);
       if(locale!=='ru'){assert.ok(!/[А-Яа-яЁё]/.test(await page.locator('#connection-settings').innerText()));assert.ok(!/[А-Яа-яЁё]/.test(await page.locator('.settings-close').getAttribute('aria-label')));}
       await page.locator('#confirm-invitation').check();await page.keyboard.press('Tab');assert.ok(await page.evaluate(()=>document.querySelector('#connection-settings').contains(document.activeElement)),'keyboard focus stays inside the modal');
       if(locale==='ru'&&width!==320)await page.screenshot({path:`artifacts/web-settings-${width}.png`});
-      await page.locator('#connection-settings [data-close-settings]').last().click();assert.ok(await page.locator('#connection-settings').isHidden());assert.equal(await page.locator('[role=tab][aria-selected=true]').getAttribute('id'),'tab-devices');assert.ok(await page.locator('#open-settings').evaluate(button=>button===document.activeElement));
-      await page.locator('#open-settings').click();await page.keyboard.press('Escape');assert.ok(await page.locator('#connection-settings').isHidden());
-      await page.locator('#open-settings').click();await page.mouse.click(2,2);assert.ok(await page.locator('#connection-settings').isHidden());
-      await page.locator('#open-settings').click();await page.locator('#connection-settings [data-close-settings]').first().click();assert.ok(await page.locator('#connection-settings').isHidden());
-      await page.reload();await page.locator('#open-settings').click();assert.ok(await page.locator('#confirm-invitation').isChecked());await page.locator('#confirm-invitation').uncheck();await page.locator('#connection-mode').selectOption('internet');await page.locator('#connection-settings [data-close-settings]').last().click();assert.equal(await page.locator('#connection-mode').inputValue(),'internet');
-      checks.push({locale,width,threeTabs:true,rightGear:true,modal:true,keyboard:true,preferenceSaved:true});await context.close();
+      await page.locator('#connection-settings [data-close-settings]').last().click();assert.ok(await page.locator('#connection-settings').isHidden());assert.equal(await page.locator('[role=tab][aria-selected=true]').getAttribute('id'),'tab-devices');assert.ok(await page.locator(gearSelector).evaluate(button=>button===document.activeElement));
+      await openSettings(page);await page.keyboard.press('Escape');assert.ok(await page.locator('#connection-settings').isHidden());
+      await openSettings(page);await page.mouse.click(2,2);assert.ok(await page.locator('#connection-settings').isHidden());
+      await openSettings(page);await page.locator('#connection-settings [data-close-settings]').first().click();assert.ok(await page.locator('#connection-settings').isHidden());
+      await page.reload();await openSettings(page);assert.ok(await page.locator('#confirm-invitation').isChecked());await page.locator('#confirm-invitation').uncheck();await page.locator('#connection-mode').selectOption('internet');await page.locator('#connection-settings [data-close-settings]').last().click();assert.equal(await page.locator('#connection-mode').inputValue(),'internet');
+      if(mobile){
+        assert.equal(await page.locator('#mobile-navigation button').count(),4);
+        if(locale!=='ru')assert.ok(!/[А-Яа-яЁё]/.test(await page.locator('#mobile-navigation').innerText()));
+        await page.locator('#mobile-send').click();assert.ok(await page.locator('#send-panel').isVisible());assert.ok(await page.locator('#receive-panel').isHidden());
+        await page.locator('#mobile-received').click();assert.ok(await page.locator('#receive-panel').isVisible());assert.ok(await page.locator('#send-panel').isHidden());
+        const bottom=await page.locator('#mobile-navigation').boundingBox();assert.ok(bottom.y>0&&bottom.y+bottom.height<=844);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+      }
+      checks.push({locale,width,threeTabs:true,rightGear:true,modal:true,keyboard:true,preferenceSaved:true,bottomMenu:mobile});await context.close();
     }
   }
   assert.deepEqual(errors,[]);const report={passed:true,origin:base,testedAt:new Date().toISOString(),checks,errors};await writeFile('artifacts/web-settings'+(supplied?'-public':'')+'-verification.json',JSON.stringify(report,null,2));console.log('Web settings passed: five languages, three widths, three tabs, modal, keyboard, focus, four close actions and saved preference.');

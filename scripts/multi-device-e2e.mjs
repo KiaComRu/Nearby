@@ -1,3 +1,4 @@
+import {selectPane,openSettings} from './web-navigation.mjs';
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
 import { randomBytes, createHash } from 'node:crypto';
@@ -26,14 +27,14 @@ try {
   }
   const [hub, laptop, phone, tablet] = pages;
   async function pair(host, guest, mode, hostCount, guestCount, numeric = false) {
-    await host.locator('#tab-connection').click();
+    await selectPane(host,'connection');
     if (await host.locator('#connection-mode').inputValue() !== mode) {
-      await host.locator('#open-settings').click(); await host.locator('#connection-mode').selectOption(mode); await host.locator('#connection-settings [data-close-settings]').last().click();
+      await openSettings(host); await host.locator('#connection-mode').selectOption(mode); await host.locator('#connection-settings [data-close-settings]').last().click();
     }
     await host.locator('#create').click(); await host.locator('#share-link').waitFor();
     const invite = await host.locator('#share-link').inputValue(), code = await host.locator('#connection-id').textContent();
     assert.match(code, /^\d{3}-\d{3}-\d{3}$/);
-    if (numeric) { await guest.locator('#tab-connection').click(); await guest.locator('#invite-input').fill(code); await guest.locator('#join-form button').click(); }
+    if (numeric) { await selectPane(guest,'connection'); await guest.locator('#invite-input').fill(code); await guest.locator('#join-form button').click(); }
     else await guest.goto(invite);
     await host.locator('#approve').waitFor(); await host.locator('#approve').click();
     await host.waitForFunction(count => document.querySelector('#connected-count').textContent === String(count), hostCount, { timeout: 60000 });
@@ -41,12 +42,12 @@ try {
     return { code, room: new URLSearchParams(new URL(invite).hash.slice(1)).get('room'), secret: new URLSearchParams(new URL(invite).hash.slice(1)).get('secret') };
   }
   async function select(page, name) {
-    await page.locator('#tab-devices').click(); await page.locator('.device-target').filter({ has: page.locator('.device-name', { hasText: name }) }).locator('input').check();
+    await selectPane(page,'devices'); await page.locator('.device-target').filter({ has: page.locator('.device-name', { hasText: name }) }).locator('input').check();
     await page.locator('#devices-transfer').click(); assert.equal(await page.locator('#recipient-name').textContent(), name);
   }
   async function send(from, to, name, bytes = randomBytes(70001)) {
     const pending = to.waitForEvent('download');
-    await from.locator('#tab-transfer').click(); await from.locator('#files').setInputFiles({ name, mimeType: 'application/octet-stream', buffer: bytes });
+    await selectPane(from,'transfer'); await from.locator('#files').setInputFiles({ name, mimeType: 'application/octet-stream', buffer: bytes });
     const download = await pending; assert.equal(download.suggestedFilename(), name); assert.equal(hash(await readFile(await download.path())), hash(bytes));
     await from.waitForFunction(() => !document.querySelector('#files').disabled);
     return bytes.length;
@@ -61,11 +62,11 @@ try {
   let totalBytes = 0;
   await select(hub, 'Laptop'); totalBytes += await send(hub, laptop, 'only-laptop.bin'); assert.equal(downloads.get(phone).length, 0);
   await select(hub, 'Phone'); totalBytes += await send(hub, phone, 'only-phone.bin'); totalBytes += await send(hub, phone, 'empty-phone.bin', Buffer.alloc(0)); assert.equal(downloads.get(laptop).length, 1);
-  await hub.locator('#tab-devices').click();
+  await selectPane(hub,'devices');
   totalBytes += await send(laptop, hub, 'from-laptop.bin'); assert.equal(await hub.locator('body').getAttribute('data-active-pane'), 'devices'); assert.equal(await hub.locator('#recipient-name').textContent(), 'Phone');
   totalBytes += await send(phone, hub, 'from-phone.bin'); assert.equal(await hub.locator('#recipient-name').textContent(), 'Phone');
   // A pending extra invitation can be cancelled without disturbing either active pairing.
-  await hub.locator('#tab-connection').click(); await hub.locator('#create').click(); await hub.locator('#share-link').waitFor(); await hub.locator('#disconnect').click();
+  await selectPane(hub,'connection'); await hub.locator('#create').click(); await hub.locator('#share-link').waitFor(); await hub.locator('#disconnect').click();
   assert.equal(await hub.locator('#connected-count').textContent(), '2');
   await select(hub, 'Phone'); await hub.evaluate(() => window.testConnections[0].forceState('failed'));
   await laptop.waitForFunction(() => document.querySelector('#transport-label').textContent.includes('Интернет') && !document.querySelector('#files').disabled);
@@ -93,25 +94,25 @@ try {
   await select(hub, 'Tablet'); await hub.locator('#disconnect-selected').click(); await hub.waitForFunction(() => document.querySelector('#connected-count').textContent === '1');
   assert.ok(await hub.locator('#tab-devices').isHidden()); assert.ok(await hub.locator('#files').isDisabled()); await hub.locator('#select-remaining').click(); assert.equal(await hub.locator('#recipient-name').textContent(), 'Laptop');
   totalBytes += await send(hub, laptop, 'explicit-new-recipient.bin');
-  await hub.locator('#tab-connection').click(); assert.ok(await hub.locator('#transfer-statistics').isVisible()); await hub.locator('#tab-transfer').click(); assert.ok(await hub.locator('#transfer-statistics').isHidden());
+  await selectPane(hub,'connection'); assert.ok(await hub.locator('#transfer-statistics').isVisible()); await selectPane(hub,'transfer'); assert.ok(await hub.locator('#transfer-statistics').isHidden());
   // Return to two targets for mobile, keyboard and locale checks.
   const d = await pair(hub, phone, 'auto', 2, 1, true);
-  await hub.setViewportSize({ width: 390, height: 844 }); await hub.locator('#tab-devices').click();
+  await hub.setViewportSize({ width: 390, height: 844 }); await selectPane(hub,'devices');
   await hub.screenshot({ path: 'artifacts/multi-device-mobile.png', fullPage: true });
-  for (const pane of ['connection', 'devices', 'transfer']) { await hub.locator(`#tab-${pane}`).click(); assert.ok(await hub.evaluate(() => document.documentElement.scrollWidth <= innerWidth)); }
+  for (const pane of ['connection', 'devices', 'transfer']) { await selectPane(hub,pane); assert.ok(await hub.evaluate(() => document.documentElement.scrollWidth <= innerWidth)); }
   await select(hub, 'Phone'); await hub.screenshot({ path: 'artifacts/multi-device-transfer-mobile.png', fullPage: true });
-  await hub.locator('#tab-devices').click(); await hub.locator('#tab-devices').focus(); await hub.keyboard.press('ArrowRight'); assert.equal(await hub.locator('#tab-transfer').getAttribute('aria-selected'), 'true');
+  await selectPane(hub,'devices'); await hub.locator('#mobile-send').focus(); await hub.keyboard.press('Enter'); assert.equal(await hub.locator('#tab-transfer').getAttribute('aria-selected'), 'true');
   const selectedRoom = await hub.locator('#device-list input:checked').inputValue();
   for (const language of ['en', 'hi', 'zh-CN', 'es', 'ru']) {
     await hub.locator('#web-language-choice').selectOption(language); await hub.waitForFunction(language => document.documentElement.lang === language, language);
-    await hub.locator('#tab-devices').click();
+    await selectPane(hub,'devices');
     if (language !== 'ru') assert.ok(!/[А-Яа-яЁё]/.test(await hub.locator('#devices-pane').innerText()), language + ': untranslated device selector');
     assert.deepEqual(await hub.locator('#device-list .device-name').allTextContents(), ['Laptop', 'Phone']);
     assert.equal(await hub.locator('#device-list input:checked').inputValue(), selectedRoom);
-    await hub.locator('#tab-transfer').click(); assert.equal(await hub.locator('#recipient-name').textContent(), 'Phone');
+    await selectPane(hub,'transfer'); assert.equal(await hub.locator('#recipient-name').textContent(), 'Phone');
   }
   for (const viewport of [{ width: 320, height: 568 }, { width: 844, height: 390 }, { width: 1366, height: 768 }]) {
-    await hub.setViewportSize(viewport); await hub.locator('#tab-devices').click();
+    await hub.setViewportSize(viewport); await selectPane(hub,'devices');
     assert.ok(await hub.evaluate(() => document.documentElement.scrollWidth <= innerWidth && document.documentElement.scrollHeight <= innerHeight));
     assert.ok((await hub.locator('#device-list').boundingBox()).height > 100);
   }

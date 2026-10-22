@@ -178,3 +178,42 @@ body.compact-app{height:100vh;height:100dvh;min-height:0;display:flex;flex-direc
 .web-app .settings-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:20px}.web-app .settings-heading h2{margin:0;font-size:20px}.web-app .settings-close{display:grid;place-items:center;flex:0 0 34px;padding:6px;min-width:34px}
 .web-app .settings-content{display:flex;flex-direction:column;gap:10px}.web-app .settings-content>label{margin:0}.web-app .settings-content select{width:100%;margin:0}.web-app .settings-content p{font-size:12px;line-height:1.5;color:var(--muted);margin:0}.web-app .settings-content .invitation-confirmation{display:flex;align-items:flex-start;gap:9px;white-space:normal;font-size:13px;line-height:1.5;margin-top:8px}.web-app .settings-content #confirm-invitation{margin:3px 0 0;flex-shrink:0}
 .web-app .settings-footer{display:flex;justify-content:flex-end;margin-top:22px}
+
+.web-app .mobile-navigation,.web-app .mobile-only{display:none}
+@media(max-width:550px),(max-width:950px) and (pointer:coarse){
+  .web-app:has(#mobile-navigation) .workspace-bar,.web-app:has(#mobile-navigation) .intro,.web-app:has(#mobile-navigation)>footer{display:none}
+  .web-app:has(#mobile-navigation)>header{padding-top:calc(6px + env(safe-area-inset-top));height:calc(48px + env(safe-area-inset-top));min-height:calc(48px + env(safe-area-inset-top))}
+  .web-app:has(#mobile-navigation)>main{padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right))}
+  .web-app:has(#mobile-navigation) .mobile-navigation{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));position:relative;z-index:40;flex-shrink:0;gap:3px;padding:7px max(6px,env(safe-area-inset-right)) calc(7px + env(safe-area-inset-bottom)) max(6px,env(safe-area-inset-left));border-top:1px solid var(--line);background:#0c1524}
+  .web-app:has(#mobile-navigation) .mobile-navigation button{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:5px;min-width:0;min-height:59px;padding:6px 2px;border:0;border-radius:10px;background:transparent;color:var(--muted);font-size:10px;font-weight:500;line-height:1.25;font-family:inherit;cursor:pointer;overflow-wrap:anywhere}
+  .web-app:has(#mobile-navigation) .mobile-navigation button>span{margin:0;max-width:100%}
+  .web-app:has(#mobile-navigation) .mobile-navigation svg{width:23px;height:23px;flex:0 0 23px;pointer-events:none}
+  .web-app:has(#mobile-navigation) .mobile-navigation button[aria-current=page]{color:var(--cyan);background:#77e8ff12}
+  .web-app:has(#mobile-navigation) .mobile-navigation .mobile-badge{position:absolute;top:2px;right:calc(50% - 25px);min-width:16px;padding:2px 4px;border-radius:10px;background:var(--cyan);color:#071425;font-size:9px;line-height:1.1}
+  .web-app:has(#mobile-navigation) .mobile-only{display:inline-flex}
+  .web-app:has(#mobile-navigation) #transfer-workspace{min-height:0;flex:1}
+  .web-app:has(#mobile-navigation) .transfer-columns{display:flex;flex-direction:column;overflow:hidden;min-height:0;flex:1}
+  .web-app:has(#mobile-navigation) .transfer-columns>.panel{flex:1;min-height:0}
+  .web-app:has(#mobile-navigation)[data-mobile-screen=send] #receive-panel,.web-app:has(#mobile-navigation)[data-mobile-screen=received] #send-panel,.web-app:has(#mobile-navigation)[data-mobile-screen=received] .recipient-bar{display:none}
+  .web-app:has(#mobile-navigation) #mobile-connect{align-self:flex-start;margin:4px 0}
+  .web-app:has(#mobile-navigation) .drop{min-height:120px;max-height:155px;margin:12px 0}
+  .web-app:has(#mobile-navigation) .drop strong{font-size:15px}
+  .web-app:has(#mobile-navigation) .transfer-scroll{overflow-x:hidden;padding:0 2px}
+  .web-app:has(#mobile-navigation) #transfer-pane .transfer-table{display:block;min-width:0;width:100%}
+  .web-app:has(#mobile-navigation) .transfer-table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+  .web-app:has(#mobile-navigation) .transfer-table tbody{display:block}
+  .web-app:has(#mobile-navigation) .transfer-table tr.transfer{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:'file actions' 'size date';gap:5px 8px;padding:12px 0;border-bottom:1px solid var(--line)}
+  .web-app:has(#mobile-navigation) .transfer-table tr.transfer>td{display:block;padding:0;border:0;min-width:0}
+  .web-app:has(#mobile-navigation) .transfer-table tr.transfer>td:first-child{grid-area:file}
+  .web-app:has(#mobile-navigation) .transfer-table .transfer-size{grid-area:size;padding-left:48px;font-size:10px;color:var(--muted)}
+  .web-app:has(#mobile-navigation) .transfer-table .transfer-date{grid-area:date;align-self:end;text-align:right;font-size:9px;color:var(--muted)}
+  .web-app:has(#mobile-navigation) .transfer-table .transfer-status{grid-area:actions}
+  .web-app:has(#mobile-navigation) .transfer-file{gap:8px}
+  .web-app:has(#mobile-navigation) .transfer-table .transfer-title{font-size:13px;line-height:1.4}
+  .web-app:has(#mobile-navigation) .transfer-table .transfer-icon{width:29px;min-width:29px;flex-basis:29px;height:32px;padding:4px!important}
+  .web-app:has(#mobile-navigation) .transfer-file-actions{gap:0}
+  .web-app:has(#mobile-navigation) .recipient-bar{padding:5px 0}
+  .web-app:has(#mobile-navigation) #choose-recipient{order:3}
+}
+
+@media(max-height:560px) and (max-width:950px) and (pointer:coarse){.web-app:has(#mobile-navigation) #send-panel{overflow-y:auto}.web-app:has(#mobile-navigation) #send-panel .transfer-scroll{flex:1 0 110px}.web-app:has(#mobile-navigation) .drop{min-height:80px;max-height:100px}}

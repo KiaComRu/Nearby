@@ -1,3 +1,4 @@
+import {selectPane,openSettings} from './web-navigation.mjs';
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
@@ -39,7 +40,7 @@ try {
   assert.match(await host.locator('#transport-label').textContent(), /Интернет/);
   let count = 0, size = 0;
   async function transfer(from, to, name, bytes) {
-    await from.waitForFunction(() => !document.querySelector('#files').disabled);
+    await selectPane(from,'transfer'); await selectPane(to,'received'); await from.waitForFunction(() => !document.querySelector('#files').disabled);
     const downloading = to.waitForEvent('download');
     await from.locator('#files').setInputFiles({ name, mimeType: 'application/octet-stream', buffer: bytes });
     const card = to.locator('.transfer').filter({ has: to.getByText(name, { exact: true }) });
@@ -49,7 +50,7 @@ try {
     count++; size += bytes.length;
     assert.equal(await card.locator('td').count(), 4);
     const cells = await card.locator('td').evaluateAll(nodes => nodes.map(n => ({ x: n.getBoundingClientRect().x, y: n.getBoundingClientRect().y })));
-    assert.ok(cells.every(c => Math.abs(c.y - cells[0].y) < 1), 'all cells belong to the same table row'); assert.ok(cells.every((c, i) => !i || c.x > cells[i-1].x));
+    if(!await to.locator('#mobile-navigation').isVisible()){assert.ok(cells.every(c => Math.abs(c.y - cells[0].y) < 1), 'desktop table cells share a row');assert.ok(cells.every((c,i)=>!i||c.x>cells[i-1].x));}
     const started = Date.parse(await card.locator('time').getAttribute('datetime')); assert.ok(Math.abs(Date.now() - started) < 60000);
     const open = card.getByRole('link', { name: 'Открыть', exact: true }); const url = await open.getAttribute('href'); assert.ok(url.startsWith('blob:'));
     assert.equal(await open.getAttribute('rel'), 'noopener noreferrer');
@@ -97,7 +98,7 @@ try {
   await mkdir('artifacts', { recursive: true });
   await host.screenshot({ path: 'artifacts/nearby-internet-desktop.png', fullPage: true });
   await guest.screenshot({ path: 'artifacts/nearby-internet-mobile.png', fullPage: true });
-  await guest.locator('#tab-connection').click(); await host.locator('#tab-connection').click(); await guest.locator('#disconnect').click(); await host.locator('#disconnect').filter({ hasText: 'Новое подключение' }).waitFor({ timeout: 10000 });
+  await selectPane(guest,'connection'); await selectPane(host,'connection'); await guest.locator('#disconnect').click(); await host.locator('#disconnect').filter({ hasText: 'Новое подключение' }).waitFor({ timeout: 10000 });
   assert.deepEqual(errors, []);
   const report = { passed: true, rtcDisabled: true, websiteOriginOnly: true, files: count, bytes: size, encryptedRequests: true, statisticsVerified: true, limitMiB: 100, testedAt: new Date().toISOString() };
   await writeFile('artifacts/Nearby-internet-verification.json', JSON.stringify(report, null, 2));

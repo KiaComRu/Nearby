@@ -1,3 +1,4 @@
+import {selectPane,openSettings} from './web-navigation.mjs';
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -74,7 +75,7 @@ try {
   await page.screenshot({ path: 'artifacts/nearby-pwa-offline-mobile.png' });
   await phone.setOffline(false); await page.getByRole('link', { name: 'Попробовать снова' }).click();
   await page.locator('#create').waitFor();
-  await page.locator('#open-settings').click();
+  await openSettings(page);
   await page.locator('#connection-mode').selectOption('internet'); await page.locator('#connection-settings [data-close-settings]').last().click(); await page.locator('#create').click();
   await page.locator('#share-link').waitFor(); const invitation = await page.locator('#share-link').inputValue();
   const recipient = await browser.newContext({ acceptDownloads: true });
@@ -96,7 +97,7 @@ try {
   assert.equal(hash(await readFile(await (await downloading).path())), hash(bytes));
   assert.equal(await page.evaluate(() => window.pwaSessionMarker), 'still-open');
   assert.deepEqual(await cacheKeys(), expected); assert.deepEqual(await guest.evaluate(async () => { const result = []; for (const key of await caches.keys()) for (const item of await (await caches.open(key)).keys()) result.push(item.url); return result.sort(); }), expected);
-  await page.locator('#tab-connection').click(); await page.locator('#disconnect').click(); await page.close();
+  await selectPane(page,'connection'); await page.locator('#disconnect').click(); await page.close();
   const reopened = await phone.newPage(); await reopened.goto(target);
   await reopened.waitForFunction(async () => { const registration = await navigator.serviceWorker.getRegistration(); return registration.active?.state === 'activated' && !registration.waiting; });
   const remaining = await reopened.evaluate(() => caches.keys()); assert.ok(remaining.includes('another-application-cache')); assert.ok(!remaining.some(key => key.endsWith('-obsolete')));

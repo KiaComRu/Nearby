@@ -1,3 +1,4 @@
+import {selectPane,openSettings} from './web-navigation.mjs';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 import { randomBytes, createHash } from 'node:crypto';
@@ -45,7 +46,7 @@ try {
     await owner.setViewportSize(viewport); await fit(owner, 'desktop connection');
     const gear=await owner.locator('#open-settings').boundingBox(),bar=await owner.locator('.workspace-bar').boundingBox(),tab=await owner.locator('#tab-connection').boundingBox();
     assert.ok(Math.abs(gear.y+gear.height/2-tab.y-tab.height/2)<2,'settings gear shares the tab row');assert.ok(Math.abs(gear.x+gear.width-bar.x-bar.width)<2,'settings gear is at the far right');
-    await owner.locator('#open-settings').click();assert.ok(await owner.locator('#connection-settings').evaluate(dialog=>dialog.matches(':modal')));assert.equal(await owner.locator('#connection-settings summary').count(),0);
+    await openSettings(owner);assert.ok(await owner.locator('#connection-settings').evaluate(dialog=>dialog.matches(':modal')));assert.equal(await owner.locator('#connection-settings summary').count(),0);
     const modal=await owner.locator('#connection-settings').boundingBox();assert.ok(modal.x>=0&&modal.y>=0&&modal.x+modal.width<=viewport.width+1&&modal.y+modal.height<=viewport.height+1);
     await owner.screenshot({path:viewport.width===390?'artifacts/settings-modal-mobile.png':'artifacts/settings-modal-desktop.png'});await owner.keyboard.press('Escape');assert.ok(await owner.locator('#connection-settings').isHidden());assert.ok(await owner.locator('#open-settings').evaluate(button=>button===document.activeElement));
     const cards = await owner.locator('#pc-connect,#connection').evaluateAll(nodes => nodes.map(node => ({ x: node.getBoundingClientRect().x, y: node.getBoundingClientRect().y })));
@@ -53,16 +54,16 @@ try {
   }
   await owner.setViewportSize({ width: 1366, height: 768 });
   await owner.screenshot({ path: 'artifacts/compact-desktop-connection.png' });
-  await owner.locator('#open-settings').click();
+  await openSettings(owner);
   await owner.locator('#connection-mode').selectOption('internet');await owner.locator('#connection-settings [data-close-settings]').last().click();await fit(owner, 'desktop internet');
   assert.ok(await owner.locator('#internet-option').isVisible()); assert.ok(!await owner.locator('#desktop-lan').isVisible());
-  await owner.locator('#open-settings').click();await owner.locator('#connection-mode').selectOption('lan');await owner.locator('#connection-settings [data-close-settings]').first().click();
+  await openSettings(owner);await owner.locator('#connection-mode').selectOption('lan');await owner.locator('#connection-settings [data-close-settings]').first().click();
   await client.locator('#pc-address').fill(`http://127.0.0.1:${first.port}/#pin=${first.pin}`);
   await client.locator('#pc-connect-submit').click();
   await owner.locator('#tab-transfer[aria-selected=true]').waitFor(); await client.locator('#tab-transfer[aria-selected=true]').waitFor();
-  await owner.locator('#open-settings').click();assert.ok(await owner.locator('#connection-settings').isVisible());await owner.locator('#confirm-invitation').check();await owner.mouse.click(2,2);assert.ok(await owner.locator('#connection-settings').isHidden());assert.equal(await owner.locator('[role=tab][aria-selected=true]').getAttribute('id'),'tab-transfer');await owner.locator('#open-settings').click();assert.ok(await owner.locator('#confirm-invitation').isChecked());await owner.locator('#confirm-invitation').uncheck();await owner.keyboard.press('Escape');
+  await openSettings(owner);assert.ok(await owner.locator('#connection-settings').isVisible());await owner.locator('#confirm-invitation').check();await owner.mouse.click(2,2);assert.ok(await owner.locator('#connection-settings').isHidden());assert.equal(await owner.locator('[role=tab][aria-selected=true]').getAttribute('id'),'tab-transfer');await openSettings(owner);assert.ok(await owner.locator('#confirm-invitation').isChecked());await owner.locator('#confirm-invitation').uncheck();await owner.keyboard.press('Escape');
   for (const [name, data] of [['auto.bin', randomBytes(1024 * 1024 + 17)], ['auto-empty.txt', Buffer.alloc(0)]]) {
-    await owner.locator('#tab-connection').click();
+    await selectPane(owner,'connection');
     await client.locator('#files').setInputFiles({ name, mimeType: 'application/octet-stream', buffer: data });
     await client.locator('#queue .file-row').filter({ hasText: name }).getByText('Получено и сохранено на компьютере', { exact: true }).waitFor({ state: 'attached' });
     await owner.locator('#tab-transfer[aria-selected=true]').waitFor();
@@ -149,10 +150,10 @@ try {
   await guest.locator('#connect-card #session').waitFor();
   await host.locator('#approve').click();
   assert.equal(await host.locator('#invitation-id').isVisible(), false, 'A used ID must disappear');
-  for (const target of [host,guest]) await target.locator('#tab-transfer[aria-selected=true]').waitFor({ timeout:60000 });
+  for (const target of [host,guest]) await target.locator('#tab-transfer[aria-selected=true]').waitFor({ state:'attached',timeout:60000 });
   for (const [from,to,name,data] of [[host,guest,'web-auto.bin',randomBytes(512*1024+7)],[guest,host,'web-back.bin',randomBytes(256*1024+11)],[host,guest,'web-empty.txt',Buffer.alloc(0)]]) {
     const disk = folderMode && to === host;
-    const downloading = disk ? null : to.waitForEvent('download');
+    await selectPane(from,'transfer');await selectPane(to,'received'); const downloading = disk ? null : to.waitForEvent('download');
     await from.locator('#files').setInputFiles({ name, mimeType:'application/octet-stream',buffer:data });
     const card = to.locator('.transfer').filter({ has: to.getByText(name,{exact:true}) });
     if (disk) {
@@ -167,7 +168,7 @@ try {
     await from.waitForFunction(()=>!document.querySelector('#files').disabled);
   }
   await fit(host,'web connected'); await fit(guest,'mobile connected');
-  await guest.locator('#tab-connection').click();
+  await selectPane(guest,'connection');
   for (const language of ['ru','en','hi','zh-CN','es']) {
     await guest.locator('#web-language-choice').selectOption(language);
     await guest.waitForFunction(language => document.documentElement.lang === language, language);
@@ -178,10 +179,10 @@ try {
     }), language + ': statistics labels must fit inside the card');
   }
   await guest.locator('#web-language-choice').selectOption('ru');
-  await guest.locator('#tab-transfer').click();
+  await selectPane(guest,'transfer');
   await host.screenshot({path:'artifacts/compact-web-desktop-transfer.png'}); await guest.screenshot({path:'artifacts/compact-web-mobile-transfer.png'});
-  await host.locator('#tab-connection').click(); assert.ok(await host.locator('#disconnect').isVisible());
-  await host.locator('#disconnect').click(); await guest.locator('#tab-connection').click(); await guest.locator('#disconnect').filter({hasText:'Новое подключение'}).waitFor();
+  await selectPane(host,'connection'); assert.ok(await host.locator('#disconnect').isVisible());
+  await host.locator('#disconnect').click(); await selectPane(guest,'connection'); await guest.locator('#disconnect').filter({hasText:'Новое подключение'}).waitFor();
   assert.deepEqual(errors,[]);
   const secret = new URLSearchParams(new URL(invite).hash.slice(1)).get('secret');
   assert.ok(!webRequests.join('\n').includes(connectionId.replaceAll('-', '')), 'Raw ID must stay on the devices');

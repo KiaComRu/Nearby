@@ -3,6 +3,15 @@
   const languages = ['en', 'hi', 'zh-CN', 'es'];
   const supported = ['ru', ...languages];
   const rows = [
+    ['Отправить файл','Send file','फ़ाइल भेजें','发送文件','Enviar archivo'],
+    ['Принятые файлы','Received files','मिली हुई फ़ाइलें','已接收文件','Archivos recibidos'],
+    ['Настройки','Settings','सेटिंग','设置','Ajustes'],
+    ['Главное меню','Main menu','मुख्य मेनू','主菜单','Menú principal'],
+    ['Новые файлы','New files','नई फ़ाइलें','新文件','Archivos nuevos'],
+    ['Выбрать получателя','Choose recipient','प्राप्तकर्ता चुनें','选择接收方','Elegir destinatario'],
+    ['Подключить устройство','Connect a device','डिवाइस कनेक्ट करें','连接设备','Conectar un dispositivo'],
+    ['Сначала подключите устройство.','Connect a device first.','पहले डिवाइस कनेक्ट करें।','请先连接设备。','Primero conecta un dispositivo.'],
+    ['Выберите получателя.','Choose a recipient.','प्राप्तकर्ता चुनें।','请选择接收方。','Elige un destinatario.'],
     ['Закрыть настройки','Close settings','सेटिंग बंद करें','关闭设置','Cerrar ajustes'],
     ['Готово','Done','हो गया','完成','Listo'],
     ["Название файла", "File name", "फ़ाइल का नाम", "文件名", "Nombre del archivo"],

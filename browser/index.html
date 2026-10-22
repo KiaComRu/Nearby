@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#080d18">
 <meta name="referrer" content="no-referrer">
   <meta name="description" content="Nearby в браузере: подключите устройства по QR или ссылке и передавайте файлы с автоматическим приёмом.">
@@ -13,7 +13,7 @@
   <meta name="apple-mobile-web-app-title" content="Nearby">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <link rel="stylesheet" href="pwa.css">
-<script src="tabs.js?v=7af7d0bd20b1" defer="">
+<script src="tabs.js?v=41d010dc7869" defer="">
 </script>
 <script defer="" src="pwa.js">
 </script>
@@ -22,16 +22,16 @@
   <link rel="apple-touch-icon" href="apple-touch-icon.png" sizes="180x180">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="localize.css?v=tabs-1">
-<script defer="" src="localize.js?v=0f61051c40ec">
+<script defer="" src="localize.js?v=d142814a6852">
 </script>
   <script defer="" src="vendor/qrcode.js">
 </script>
 <script src="file-presentation.js?v=a48986c1f592" defer=""></script>
-<script type="module" src="app-0.6.2.js?v=b7a2a1966708">
+<script type="module" src="app-0.6.3.js?v=0f1406943c6a">
 </script>
 <script defer="" src="statistics.js?v=uses-1">
 </script>
-<link rel="stylesheet" href="workspace.css?v=afe80036e7f2">
+<link rel="stylesheet" href="workspace.css?v=549ae26353c1">
 <link rel="stylesheet" href="file-presentation.css?v=a48986c1f592">
 <!-- Nearby Metrika assets --><link rel="stylesheet" href="./metrika.css?v=741678e82f2a"><script type="module" src="./metrika.js?v=741678e82f2a"></script><!-- /Nearby Metrika assets -->
 </head>
@@ -182,9 +182,9 @@
 </section>
 <section id="transfer-pane" class="tab-panel" hidden="" role="tabpanel" aria-labelledby="tab-transfer">
 <div id="transfer-workspace">
-<div class="recipient-bar"><div><span>Получатель:</span> <strong id="recipient-name">Устройство не выбрано</strong></div><button id="disconnect-selected" class="button quiet" type="button" disabled="">Отключить</button><button id="select-remaining" class="button secondary" type="button" hidden=""><span>Выбрать устройство:</span> <span id="remaining-name" class="device-name"></span></button></div>
+<div class="recipient-bar"><button id="choose-recipient" class="button secondary mobile-only" type="button" hidden>Выбрать получателя</button><div><span>Получатель:</span> <strong id="recipient-name">Устройство не выбрано</strong></div><button id="disconnect-selected" class="button quiet" type="button" disabled="">Отключить</button><button id="select-remaining" class="button secondary" type="button" hidden=""><span>Выбрать устройство:</span> <span id="remaining-name" class="device-name"></span></button></div>
 <div class="transfer-columns">
-<section class="panel">
+<section id="send-panel" class="panel">
 <h2>Отправка файлов</h2>
 <span id="transport-label" class="transport-label">Ожидаем соединение</span>
 <label id="drop" class="drop disabled">
@@ -193,11 +193,12 @@
 <span>или перетащите их сюда</span>
 <input id="files" type="file" multiple="" disabled="">
 </label>
+<button id="mobile-connect" class="button secondary mobile-only" type="button">Подключить устройство</button>
 <span id="file-limit" class="limit">Размер зависит от браузера получателя</span>
 <div class="transfer-scroll" tabindex="0" role="region" aria-label="Отправленные файлы"><table class="transfer-table"><thead><tr><th scope="col">Название файла</th><th scope="col">Размер</th><th scope="col">Дата и время</th><th scope="col"></th></tr></thead><tbody id="outgoing-transfers" aria-live="polite"></tbody></table></div>
 </section>
-<section class="panel">
-<h2>Получение файлов</h2>
+<section id="receive-panel" class="panel">
+<h2>Принятые файлы</h2>
 <div class="receive-settings">
 <button class="button secondary" type="button" data-choose-folder="" hidden="">Папка получения</button>
 <span class="receive-folder-name">Приём без подтверждения.</span>
@@ -248,5 +249,11 @@
 
 
 
+<nav id="mobile-navigation" class="mobile-navigation" aria-label="Главное меню">
+<button id="mobile-connection" type="button" data-mobile-screen="connection" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="11" rx="1.5"/><rect x="14" y="10" width="7" height="11" rx="1.5"/><path d="M10 7h4l3 3M14 17h-4l-3-3"/></svg><span>Подключение</span></button>
+<button id="mobile-send" type="button" data-mobile-screen="send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21 3-7 18-4-7-7-4Z"/><path d="m10 14 11-11"/></svg><span>Отправить файл</span></button>
+<button id="mobile-received" type="button" data-mobile-screen="received"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v10m-4-4 4 4 4-4M5 12l-2 5v4h18v-4l-2-5M3 17h5l2 2h4l2-2h5"/></svg><span>Принятые файлы</span><span id="mobile-received-badge" class="mobile-badge" aria-label="Новые файлы" hidden></span></button>
+<button id="mobile-settings" type="button" aria-haspopup="dialog" aria-controls="connection-settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 3-.6 2.2-1.8 1L4.4 6 2.9 8.6l1.6 1.7v2L2.9 14l1.5 2.6 2.2-.2 1.8 1L9 20h3l.6-2.6 1.8-1 2.2.2 1.5-2.6-1.6-1.7v-2l1.6-1.7L16.6 6l-2.2.2-1.8-1L12 3Z" transform="translate(1.5 .5)"/><circle cx="12" cy="12" r="3"/></svg><span>Настройки</span></button>
+</nav>
 </body>
 </html>

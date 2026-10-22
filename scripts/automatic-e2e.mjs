@@ -1,3 +1,4 @@
+import {selectPane,openSettings} from './web-navigation.mjs';
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
 import { randomBytes, createHash } from 'node:crypto';
@@ -67,7 +68,7 @@ try {
     assert.equal(Boolean(room.relay), scenario !== 'direct');
     await guest.screenshot({ path: `artifacts/automatic-${scenario}.png`, fullPage: true });
     assert.ok(await guest.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
-    await guest.locator('#tab-connection').click(); await guest.locator('#disconnect').click();
+    await selectPane(guest,'connection'); await guest.locator('#disconnect').click();
     report.push({ scenario, transport: room.transport, elapsedMs, files: 3, sha256: true }); console.log(JSON.stringify(report.at(-1)));
     await Promise.all(contexts.map(c => c.close()));
   }

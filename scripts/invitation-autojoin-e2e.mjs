@@ -1,3 +1,4 @@
+import {selectPane,openSettings} from './web-navigation.mjs';
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
 import { randomBytes, createHash } from 'node:crypto';
@@ -28,7 +29,7 @@ try {
     await host.locator('#approve').click();
     for (const page of [host, guest]) await page.waitForFunction(() => !document.querySelector('#files').disabled, null, { timeout: 45000 });
   }
-  async function close(host, guest) { await host.locator('#tab-connection').click(); await host.locator('#disconnect').click(); await host.close(); await guest.close(); }
+  async function close(host, guest) { await selectPane(host,'connection'); await host.locator('#disconnect').click(); await host.close(); await guest.close(); }
   const first = await invite(), guest = await phone.newPage();
   await guest.route('**/api.php', async route => {
     if (route.request().postDataJSON()?.action !== 'join') return route.continue();
@@ -50,14 +51,14 @@ try {
   await close(first.host, guest);
   const settings = await phone.newPage(); await settings.goto(base);
   assert.equal(await settings.locator('#connection-settings').getAttribute('open'), null);
-  await settings.locator('#open-settings').click();
+  await openSettings(settings);
   assert.equal(await settings.locator('#confirm-invitation').isChecked(), false);
   await settings.locator('#confirm-invitation').check(); await settings.reload();
   assert.equal(await settings.locator('#confirm-invitation').isChecked(), true);
   const manual = await invite(); await settings.goto(manual.url);
   await settings.locator('#join-invite').waitFor(); assert.equal(joins.length, 1, 'saved manual preference waits for a click');
   await settings.locator('#join-invite').click(); await approve(manual.host, settings); await close(manual.host, settings);
-  const reset = await phone.newPage(); await reset.goto(base); await reset.locator('#open-settings').click();
+  const reset = await phone.newPage(); await reset.goto(base); await openSettings(reset);
   await reset.locator('#confirm-invitation').uncheck(); await reset.reload(); assert.equal(await reset.locator('#confirm-invitation').isChecked(), false);
   const automaticAgain = await invite(); await reset.goto(automaticAgain.url); await approve(automaticAgain.host, reset); await close(automaticAgain.host, reset);
   const invalid = await phone.newPage();
@@ -71,7 +72,7 @@ try {
   await noStorage.addInitScript(() => { const get = Storage.prototype.getItem; Storage.prototype.getItem = function(key) { if (key === 'nearby.confirm-invitation') throw new DOMException('Disabled', 'SecurityError'); return get.call(this, key); }; });
   const fourth = await invite(); await noStorage.goto(fourth.url); await approve(fourth.host, noStorage); await close(fourth.host, noStorage);
   for (const locale of ['ru', 'en', 'hi', 'zh-CN', 'es']) {
-    const page = await phone.newPage(); await page.goto(base + '?lang=' + locale); await page.locator('#open-settings').click();
+    const page = await phone.newPage(); await page.goto(base + '?lang=' + locale); await openSettings(page);
     await page.waitForFunction(locale => document.documentElement.lang === locale, locale);
     assert.ok(await page.locator('#confirm-invitation').isVisible());
     if (locale !== 'ru') assert.ok(!/[А-Яа-яЁё]/.test(await page.locator('.invitation-confirmation').innerText()));

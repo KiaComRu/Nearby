@@ -90,6 +90,9 @@ function renderRecipient() {
   $('disconnect-selected').disabled = !usable;
   $('file-limit').textContent = usable && connection.link?.peerLimit ? `До ${sizes(connection.link.peerLimit)} на файл для этого получателя` : 'Выберите получателя на вкладке «Устройства».';
   const live = liveConnections();
+  $('choose-recipient').hidden = live.length < 2; $('choose-recipient').disabled = sending;
+  $('mobile-connect').hidden = live.length > 0;
+  if (!usable && window.NearbyWorkspace.isMobile()) $('file-limit').textContent = live.length ? 'Выберите получателя.' : 'Сначала подключите устройство.';
   $('select-remaining').hidden = usable || live.length !== 1;
   if (!$('select-remaining').hidden) $('remaining-name').textContent = displayName(live[0]);
 }
@@ -354,6 +357,8 @@ $('disconnect').onclick = () => { const connection = setup || selectedConnection
 $('disconnect-selected').onclick = () => selectedConnection()?.disconnect();
 $('select-remaining').onclick = () => { const live = liveConnections(); if (live.length === 1) selectRecipient(live[0].id); };
 $('devices-transfer').onclick = () => window.NearbyWorkspace.selectTab('transfer');
+$('choose-recipient').onclick = () => window.NearbyWorkspace.selectTab('devices');
+$('mobile-connect').onclick = () => window.NearbyWorkspace.selectTab('connection');
 $('copy').onclick = async () => {
   try { await navigator.clipboard.writeText(invitation); $('copy').textContent = 'Ссылка скопирована ✓'; }
   catch { $('share-link').focus(); $('share-link').select(); notice('Скопируйте выделенную ссылку.'); }

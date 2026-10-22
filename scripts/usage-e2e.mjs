@@ -1,3 +1,4 @@
+import {selectPane,openSettings} from './web-navigation.mjs';
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -30,7 +31,7 @@ try {
     await host.locator('#share-link').waitFor();await guest.goto(await host.locator('#share-link').inputValue());await guest.locator('#device-name').fill('Same phone');await guest.locator('#join-invite').click();
     await host.locator('#approve').waitFor();assert.equal((await stats()).uses,count-1);
     await host.locator('#approve').click();for(const page of [host,guest])await page.waitForFunction(()=>!document.querySelector('#files').disabled);
-    await until(async()=>(await stats()).uses===count);await host.locator('#tab-connection').click();await host.locator('#disconnect').click();await host.close();await guest.close();
+    await until(async()=>(await stats()).uses===count);await selectPane(host,'connection');await host.locator('#disconnect').click();await host.close();await guest.close();
   }
   await pinConnect();await until(async()=>(await stats()).uses===4);
   await mkdir('artifacts',{recursive:true});

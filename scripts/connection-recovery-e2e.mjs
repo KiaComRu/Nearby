@@ -1,3 +1,4 @@
+import {selectPane,openSettings} from './web-navigation.mjs';
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
 import { randomBytes, createHash } from 'node:crypto';
@@ -116,8 +117,8 @@ try {
     await transfer(host, guest, `empty-${scenario}.txt`, Buffer.alloc(0));
     assert.equal(await host.locator('#share-link').inputValue(), invite);
     await guest.screenshot({ path: `artifacts/recovery-${scenario}.png` });
-    await guest.locator('#tab-connection').click();
-    await host.locator('#tab-connection').click(); await host.locator('#disconnect').click();
+    await selectPane(guest,'connection');
+    await selectPane(host,'connection'); await host.locator('#disconnect').click();
     await guest.locator('#disconnect').filter({ hasText: 'Новое подключение' }).waitFor({ timeout: 15000 });
     report.push({ scenario, recovered: true, hashes: true }); console.log(JSON.stringify(report.at(-1)));
     await Promise.all(contexts.map(context => context.close()));
