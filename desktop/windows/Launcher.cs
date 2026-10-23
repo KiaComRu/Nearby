@@ -14,11 +14,8 @@ using Microsoft.Web.WebView2.WinForms;
 
 [assembly: System.Reflection.AssemblyTitle("Nearby")]
 [assembly: System.Reflection.AssemblyDescription("Передача файлов по локальной сети")]
-[assembly: System.Reflection.AssemblyVersion("0.6.6.0")]
-[assembly: System.Reflection.AssemblyFileVersion("0.6.6.0")]
-#if SERVER2016
-[assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.6.2")]
-#endif
+[assembly: System.Reflection.AssemblyVersion("0.6.7.0")]
+[assembly: System.Reflection.AssemblyFileVersion("0.6.7.0")]
 
 internal static class Program
 {
@@ -77,6 +74,7 @@ internal sealed class NearbyWindow : Form
     private readonly ContextMenuStrip trayMenu = new ContextMenuStrip();
     private FormWindowState restoreState = FormWindowState.Normal;
     private bool inTray;
+    private bool restoringWindow;
     private readonly System.Windows.Forms.Timer updateTimer = new System.Windows.Forms.Timer();
     private readonly CancellationTokenSource updateCancellation = new CancellationTokenSource();
     private DesktopUpdates updater;
@@ -124,6 +122,9 @@ internal sealed class NearbyWindow : Form
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     private static extern int SHGetKnownFolderPath(ref Guid id, uint flags, IntPtr token, out IntPtr path);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr window);
 
     private static string DownloadsDirectory()
     {
@@ -186,6 +187,7 @@ internal sealed class NearbyWindow : Form
         trayIcon.Icon = Icon ?? SystemIcons.Application;
         trayIcon.ContextMenuStrip = trayMenu;
         trayIcon.MouseClick += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) RestoreFromTray(); };
+        trayIcon.MouseDoubleClick += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) RestoreFromTray(); };
         trayIcon.BalloonTipClicked += delegate { ShowUpdate(); };
         trayIcon.Visible = true;
     }
@@ -193,7 +195,7 @@ internal sealed class NearbyWindow : Form
     protected override void OnResize(EventArgs e)
     {
         base.OnResize(e);
-        if (shuttingDown || !IsHandleCreated) return;
+        if (shuttingDown || restoringWindow || !IsHandleCreated) return;
         if (WindowState == FormWindowState.Minimized) {
             // Hiding the host must not dispose the WebView or stop its engine.
             inTray = true; Hide();
@@ -202,10 +204,16 @@ internal sealed class NearbyWindow : Form
 
     internal void RestoreFromTray()
     {
-        if (shuttingDown || IsDisposed) return;
-        inTray = false;
-        if (WindowState == FormWindowState.Minimized) WindowState = restoreState;
-        Show(); Activate();
+        if (shuttingDown || IsDisposed || restoringWindow) return;
+        restoringWindow = true;
+        try {
+            // Show first: restoring a hidden minimized form can cause a nested
+            // resize. It must not send the window straight back into the tray.
+            Show();
+            if (WindowState == FormWindowState.Minimized) WindowState = restoreState;
+            inTray = false;
+            BringToFront(); Activate(); SetForegroundWindow(Handle);
+        } finally { restoringWindow = false; }
     }
 
     private void BuildUpdateControls()

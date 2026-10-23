@@ -2,12 +2,20 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
 internal static class TrayNativeHarness
 {
+    [DllImport("user32.dll")] private static extern IntPtr SendMessage(IntPtr handle, int message, IntPtr wparam, IntPtr lparam);
+    private static void TrayMouse(NotifyIcon tray, int message)
+    {
+        var notificationWindow = (NativeWindow)typeof(NotifyIcon).GetField("window", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(tray);
+        // Deliver the same notification-window callback used by Explorer.
+        SendMessage(notificationWindow.Handle, 0x800, IntPtr.Zero, new IntPtr(message));
+    }
     private static object Field(NearbyWindow window, string name) { return typeof(NearbyWindow).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic).GetValue(window); }
     [STAThread] private static void Main(string[] args)
     {
@@ -27,6 +35,8 @@ internal static class TrayNativeHarness
                             if (action == "minimize") window.WindowState = FormWindowState.Minimized;
                             else if (action == "maximize") window.WindowState = FormWindowState.Maximized;
                             else if (action == "open") ((ToolStripMenuItem)tray.ContextMenuStrip.Items["nearby-tray-open"]).PerformClick();
+                            else if (action == "icon") { TrayMouse(tray, 0x201); TrayMouse(tray, 0x202); }
+                            else if (action == "double-click") { TrayMouse(tray, 0x203); TrayMouse(tray, 0x202); }
                             else if (action == "shell") window.QueueShellFiles(new[] { (string)command["path"] });
                             else if (action == "reopen") window.QueueShellFiles(new string[0]);
                             else if (action == "exit") {

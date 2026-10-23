@@ -45,13 +45,13 @@ internal static class UpdateNativeHarness
     private static async Task Core(string root)
     {
         var fake=new UpdateFakeHttp();
-        foreach(var platform in new[]{"windows-x64","windows-server-2016-x64"}) {
+        foreach(var platform in new[]{"windows-x64"}) {
             var info=DesktopUpdates.Parse(fake.Manifest(platform),platform);
             Check(info.Version==new Version(0,5,5,0),"Version normalization");
             foreach(var json in new[]{fake.Manifest(platform).Replace("Nearby-0.5.5-","../Nearby-0.5.5-"),fake.Manifest(platform).Replace(fake.Hash,"bad"),fake.Manifest(platform).Replace("2048","-1"),fake.Manifest(platform).Replace("2048","1.5"),fake.Manifest(platform).Replace("0.5.5","0.5.5\\n")}) {
                 await Reject(()=>Task.Run(()=>DesktopUpdates.Parse(json,platform)),"Unsafe metadata was accepted");
             }
-            await Reject(()=>Task.Run(()=>DesktopUpdates.Parse(fake.Manifest(platform),platform=="windows-x64"?"windows-server-2016-x64":"windows-x64")),"Cross-platform installer accepted");
+            await Reject(()=>Task.Run(()=>DesktopUpdates.Parse(fake.Manifest(platform),"unsupported-platform")),"Cross-platform installer accepted");
         }
         using(var updates=new DesktopUpdates(root,fake)) {
             Check(await updates.CheckAsync(new Version(0,5,5,0),CancellationToken.None)==null,"Must not reinstall equal versions");

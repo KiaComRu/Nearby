@@ -24,11 +24,15 @@ try {
   await writeFile(path.join(install,'Nearby.exe'),'old program');
   await writeFile(path.join(root,'data/settings.txt'),'saved pairing and settings');
   await writeFile(path.join(root,'received/kept.txt'),'received file');
-  sleeper=spawn('powershell.exe',['-NoProfile','-Command','Start-Sleep -Seconds 3'],{windowsHide:true,stdio:'ignore'});
+  // Keep the caller alive until the assertion releases it. A fixed sleep can
+  // expire before the check on a busy build machine, hiding the wait contract.
+  sleeper=spawn(process.execPath,['-e','process.stdin.resume()'],{windowsHide:true,stdio:['pipe','ignore','ignore']});
   const sleeperDone=once(sleeper,'exit');
   const installed=run(exe,['/S','/UPDATEPID='+sleeper.pid,'/D='+install],{windowsVerbatimArguments:true});
   await new Promise(resolve=>setTimeout(resolve,500));
+  assert.equal(sleeper.exitCode,null,'The requesting process must still be alive');
   assert.equal(await readFile(path.join(install,'Nearby.exe'),'utf8'),'old program','Installer must wait for the requesting process');
+  sleeper.stdin.end();
   await sleeperDone; await installed;
   for(let i=0;i<50;i++){try{if(await readFile(path.join(install,'restarted.txt'),'utf8')==='updated')break;}catch{}await new Promise(resolve=>setTimeout(resolve,100));}
   assert.equal(await readFile(path.join(install,'restarted.txt'),'utf8'),'updated');

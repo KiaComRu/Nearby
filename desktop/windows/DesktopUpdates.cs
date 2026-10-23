@@ -21,13 +21,8 @@ internal sealed class DesktopUpdateInfo
 internal sealed class DesktopUpdates : IDisposable
 {
     internal const string Website = "https://nearby.kiacom.ru";
-#if SERVER2016
-    internal const string Platform = "windows-server-2016-x64";
-    internal const string Manifest = "windows-server-2016-build.json";
-#else
     internal const string Platform = "windows-x64";
     internal const string Manifest = "windows-build.json";
-#endif
     private const long MaximumInstaller = 256L * 1024 * 1024;
     private readonly HttpClient client;
     private readonly string directory;
@@ -48,7 +43,7 @@ internal sealed class DesktopUpdates : IDisposable
         var data = serializer.Deserialize<Dictionary<string, object>>(json);
         if (data == null || !data.ContainsKey("product") || (string)data["product"] != "Nearby" ||
             !data.ContainsKey("platform") || (string)data["platform"] != platform ||
-            (platform != "windows-x64" && platform != "windows-server-2016-x64")) throw new InvalidDataException("Неверная сборка обновления.");
+            platform != "windows-x64") throw new InvalidDataException("Неверная сборка обновления.");
         string version = data.ContainsKey("version") ? data["version"] as string : null;
         Version parsed;
         if (version == null || !Regex.IsMatch(version, @"\A[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}\z") || !Version.TryParse(version, out parsed))
@@ -151,7 +146,7 @@ internal sealed class DesktopUpdates : IDisposable
                 if (!Regex.IsMatch(Path.GetFileName(folder), @"^package-[a-f0-9]{32}$") ||
                     (File.GetAttributes(folder) & FileAttributes.ReparsePoint) != 0 || Directory.GetLastWriteTimeUtc(folder) > DateTime.UtcNow.AddDays(-7)) continue;
                 foreach (string file in Directory.GetFiles(folder)) {
-                    if ((File.GetAttributes(file) & FileAttributes.ReparsePoint) == 0 && Regex.IsMatch(Path.GetFileName(file), @"^Nearby-\d+\.\d+\.\d+-windows(?:-server-2016)?-x64-setup\.exe(?:\.part)?$")) File.Delete(file);
+                    if ((File.GetAttributes(file) & FileAttributes.ReparsePoint) == 0 && Regex.IsMatch(Path.GetFileName(file), @"^Nearby-\d+\.\d+\.\d+-windows-x64-setup\.exe(?:\.part)?$")) File.Delete(file);
                 }
                 if (Directory.GetFileSystemEntries(folder).Length == 0) Directory.Delete(folder, false);
             } catch (IOException) { } catch (UnauthorizedAccessException) { }

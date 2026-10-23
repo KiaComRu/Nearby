@@ -9,7 +9,7 @@ let server, exited, browser;
 const port = publicOrigin ? null : await new Promise(resolve => { const listener = net.createServer(); listener.listen(0,'127.0.0.1', () => { const value=listener.address().port;listener.close(()=>resolve(value)); }); });
 const origin = publicOrigin || `http://127.0.0.1:${port}/`;
 const build = async name => JSON.parse((await readFile(`artifacts/${name}`, 'utf8')).replace(/^\uFEFF/,''));
-const desktop = await build('windows-build.json'), serverBuild = await build('windows-server-2016-build.json');
+const desktop = await build('windows-build.json');
 const results = [], errors = [];
 try {
   if (!publicOrigin) {
@@ -27,32 +27,21 @@ try {
       const choose=page.locator('.hero-actions a[href="#download"]');await choose.click();
       assert.equal(new URL(page.url()).hash,'#download');
       const choices=page.locator('#download .windows-download-choices');await choices.waitFor();
-      const select=choices.locator('select');await page.waitForFunction(()=>!document.getElementById('windows-build-select').disabled);
-      assert.equal(await select.inputValue(),'windows','Windows 10/11 is the default');
-      assert.deepEqual(await select.locator('option').allTextContents(),['Windows 10/11','Windows Server 2016']);
-      assert.equal(await choices.locator('[data-installer]').count(),1,'A single download button');
-      for(const [id,metadata,title,framework] of [['windows',desktop,'Windows 10/11','4.8'],['server2016',serverBuild,'Windows Server 2016','4.6.2']]) {
-        await select.selectOption(id);
-        const link=choices.locator(`[data-installer="${id}"]`), card=link.locator('..');
-        assert.equal(await link.evaluate(a=>new URL(a.href).pathname),'/downloads/'+metadata.installer);
-        assert.ok(await link.getAttribute('download')!==null);
-        assert.ok((await link.getAttribute('aria-label')).includes(title));
-        assert.ok((await card.textContent()).includes('.NET Framework '+framework));
-        if(id==='server2016')assert.ok((await card.textContent()).includes('Desktop Experience'));
-        const box=await link.boundingBox();assert.ok(box.height>=44);assert.ok(box.x>=0 && box.x+box.width<=width);
-        if(locale==='ru'&&width===1280){const downloadEvent=page.waitForEvent('download');await link.click();const download=await downloadEvent;assert.equal(download.suggestedFilename(),metadata.installer);await download.cancel();}
-        assert.ok((await choices.boundingBox()).height<340,'Compact single selector');
-      }
-      if(locale==='ru'&&width===1280){await page.reload();await page.waitForFunction(()=>!document.getElementById('windows-build-select').disabled);assert.equal(await select.inputValue(),'windows','A new visit defaults to Windows 10/11');}
-      await select.selectOption('windows');
-      assert.equal(await choices.locator('[data-installer="windows"]').evaluate(a=>new URL(a.href).pathname),'/downloads/'+desktop.installer,'Switching back restores the desktop installer');
+      assert.equal(await choices.locator('select').count(),0,'One supported build needs no selector');
+      const link=choices.locator('[data-installer="windows"]');
+      assert.equal(await link.count(),1);
+      assert.equal(await link.evaluate(a=>new URL(a.href).pathname),'/downloads/'+desktop.installer);
+      assert.ok((await link.getAttribute('aria-label')).includes('Windows 10/11'));
+      assert.ok((await choices.textContent()).includes('.NET Framework 4.8'));
+      const box=await link.boundingBox();assert.ok(box.height>=44);assert.ok(box.x>=0&&box.x+box.width<=width);
+      assert.ok((await choices.boundingBox()).height<340);
       assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`${locale} ${width}`);
       if(locale==='ru'||locale==='en')await choices.screenshot({path:`artifacts/nearby-download-choice-${publicOrigin?'public':'local'}-${locale}-${width}.png`});
-      results.push({locale,width,desktop:desktop.installer,server:serverBuild.installer});
+      results.push({locale,width,desktop:desktop.installer});
     }
     await context.close();
   }
   assert.deepEqual(errors,[]);
-  await writeFile(`artifacts/Nearby-download-dropdown-${publicOrigin?'public':'local'}-verification.json`,JSON.stringify({passed:true,origin,pages:results,version:desktop.version,singleDropdown:true,defaultWindows1011:true,singleDownloadButton:true,compactLayout:true,desktopAndServerChoices:true,heroOpensChoice:true,bothDownloadCommandsVerified:true,statisticsUnchangedByTest:true,checkedAt:new Date().toISOString()},null,2));
-  console.log('Compact Windows dropdown passed: default Windows 10/11, both downloads and switch-back, five languages and desktop/mobile layouts.');
+  await writeFile(`artifacts/Nearby-download-dropdown-${publicOrigin?'public':'local'}-verification.json`,JSON.stringify({passed:true,origin,pages:results,version:desktop.version,singleWindowsBuild:true,singleDownloadButton:true,compactLayout:true,heroOpensChoice:true,downloadLinkVerified:true,statisticsUnchangedByTest:true,checkedAt:new Date().toISOString()},null,2));
+  console.log('Single Windows download passed: five languages and desktop/mobile layouts.');
 } finally {await browser?.close();if(server){server.kill();await exited;}}

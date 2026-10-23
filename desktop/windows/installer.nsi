@@ -13,11 +13,7 @@ Var UpdatePID
 !ifndef OUTPUT
   !error "OUTPUT must point to the setup executable"
 !endif
-!ifdef SERVER2016
-Name "Nearby — Windows Server 2016"
-!else
 Name "Nearby"
-!endif
 OutFile "${OUTPUT}"
 InstallDir "$LOCALAPPDATA\Programs\Nearby"
 RequestExecutionLevel user
@@ -63,31 +59,10 @@ Function .onInit
     MessageBox MB_OK|MB_ICONSTOP "Эта сборка Nearby предназначена для 64-разрядной Windows (x64)."
     Abort
   ${EndIf}
-!ifdef SERVER2016
-  ${IfNot} ${AtLeastWin2016}
-  ${OrIfNot} ${AtLeastBuild} 14393
-    MessageBox MB_OK|MB_ICONSTOP "Эта сборка требует Windows Server 2016 или новее (x64, с рабочим столом)."
-    Abort
-  ${EndIf}
-  SetRegView 64
-  ReadRegStr $0 HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion" "InstallationType"
-  ${If} $0 == "Server Core"
-    MessageBox MB_OK|MB_ICONSTOP "Оконной версии Nearby нужен Desktop Experience. Server Core этой сборкой не поддерживается."
-    Abort
-  ${EndIf}
-  StrCpy $0 0
-  ReadRegDWORD $0 HKLM "SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full" "Release"
-  ${If} $0 < 394802
-    MessageBox MB_OK|MB_ICONSTOP "Для Nearby нужен .NET Framework 4.6.2 или новее. Установите компонент Microsoft и повторите установку."
-    Abort
-  ${EndIf}
-  SetRegView 32
-!else
   ${IfNot} ${AtLeastWin10}
     MessageBox MB_OK|MB_ICONSTOP "Для Nearby требуется Windows 10 или Windows 11."
     Abort
   ${EndIf}
-!endif
 !ifndef UPDATE_TEST
   FindWindow $0 "" "Nearby"
   StrCmp $0 0 ready
