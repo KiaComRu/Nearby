@@ -36,6 +36,12 @@
   }
   window.NearbyWorkspace = {
     selectTab,
+    openReceived() {
+      hadConnection = true;
+      const transfer = tabs.find(tab => tab.dataset.pane === 'transfer');
+      transfer.disabled = false;
+      selectTab('transfer');
+    },
     setDevices(count) {
       const devices = tabs.find(tab => tab.dataset.pane === 'devices');
       if (!devices) return;

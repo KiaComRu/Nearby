@@ -177,6 +177,7 @@ body.compact-app{height:100vh;height:100dvh;min-height:0;display:flex;flex-direc
 .native-app .settings-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:20px}.native-app .settings-heading h2{margin:0;font-size:20px}.native-app .settings-close{display:grid;place-items:center;flex:0 0 34px;padding:6px;min-width:34px}
 .native-app .settings-content{display:flex;flex-direction:column;gap:10px}.native-app .settings-content>label{margin:0}.native-app .settings-content select{width:100%;margin:0}.native-app .settings-content p{font-size:12px;line-height:1.5;color:var(--muted);margin:0}.native-app .settings-content .invitation-confirmation{display:flex;align-items:flex-start;gap:9px;white-space:normal;font-size:13px;line-height:1.5;margin-top:8px}.native-app .settings-content #confirm-invitation{margin:3px 0 0;flex-shrink:0}
 .native-app .settings-footer{display:flex;justify-content:flex-end;margin-top:22px}
+.native-app #receive-notifications{width:16px;height:16px;min-height:0;margin:3px 0 0;padding:0;flex:0 0 16px}
 
 /* One automatic invitation is primary; nearby PCs remain available below it. */
 .native-app:not([data-connection-mode=lan]) #connection-pane{overflow:auto;overscroll-behavior:contain}

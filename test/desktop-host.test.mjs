@@ -38,8 +38,10 @@ test('packaged host uses separate user folders and exits when its launcher close
     const offer = await (await fetch(url.origin + '/api/offers', { method: 'POST', headers: clientHeaders, body: JSON.stringify({ name: 'desktop.txt', size: 4 }) })).json();
     const acceptance = await fetch(url.origin + `/api/offers/${offer.id}`, { method: 'POST', headers: { ...adminHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'accept' }) });
     assert.equal(acceptance.status, 200);
+    const receivedEvent = once(lines, 'line');
     const sent = await fetch(url.origin + `/api/offers/${offer.id}/upload`, { method: 'POST', headers: { Authorization: `Bearer ${joined.token}` }, body: 'test' });
     assert.equal(sent.status, 201);
+    assert.deepEqual(JSON.parse((await receivedEvent)[0]), { type: 'file-received', id: offer.id, name: 'desktop.txt' });
     const files = await readdir(received);
     assert.equal(files.length, 1);
     assert.equal(await readFile(path.join(received, files[0]), 'utf8'), 'test');

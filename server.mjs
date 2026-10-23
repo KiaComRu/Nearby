@@ -81,6 +81,7 @@ export async function createApp({
   maxSize = 100 * 1024 ** 3,
   openReceivedFolder = openFolder,
   openTransferredFile = openFolder,
+  onFileReceived = () => {},
   internetEndpoint = INTERNET_API,
   statistics = {},
   discovery = host === '0.0.0.0' && process.env.NEARBY_DISABLE_DISCOVERY !== '1' ? {} : false,
@@ -206,6 +207,10 @@ export async function createApp({
       await pipeline(req, counter, createWriteStream(temporary, { flags: 'wx', mode: 0o600 }));
       if (received !== spec.size) throw fail(400, 'Файл получен не полностью.');
       await rename(temporary, final);
+      if (folder === inbox) {
+        try { onFileReceived({ id: spec.id, name: spec.name }); }
+        catch { /* A desktop notification must never fail a saved transfer. */ }
+      }
       return final;
     } finally {
       active.delete(id);

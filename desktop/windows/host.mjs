@@ -10,8 +10,9 @@ if (!storage || !receivedDirectory || !path.isAbsolute(storage) || !path.isAbsol
   throw new Error('Не заданы папки данных приложения. Запустите Nearby.exe.');
 }
 const app = await createApp({ port: 0, storage, receivedDirectory,
+  onFileReceived: file => console.log(JSON.stringify({ type: 'file-received', ...file })),
   statistics: process.env.NEARBY_DISABLE_STATISTICS === '1' ? false : { source: 'windows' } });
-// One private handshake over stdout, consumed by the local launcher only.
+// Private handshake, followed by receive events and update replies for the launcher.
 console.log(JSON.stringify({ url: app.adminUrl, receivedDirectory: app.inbox }));
 let stopping = false;
 async function stop() {

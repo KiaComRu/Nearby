@@ -118,10 +118,23 @@ function registerNativeFile(id, index, input = 'files') {
 }
 nativeBridge?.addEventListener('message', event => {
   const value = event.data;
+  if (value?.type === 'nearby-desktop-settings') {
+    $('receive-notifications').checked = value.receiveNotifications === true;
+    $('receive-notifications').disabled = false;
+    $('receive-notifications-hint').textContent = value.saved === false ? 'Не удалось сохранить настройку. Повторите попытку.' : 'Показывать всплывающее уведомление после сохранения файла, когда Nearby свёрнут в трей.';
+  }
   if (value?.type === 'nearby-file-registered') { nativePending.get(value.id)?.(value.ok); nativePending.delete(value.id); if (value.ok) nativeFiles.add(value.id); }
   if (value?.type === 'nearby-download-complete' && value.ok) { nativeFiles.add(value.id); rendered = ''; if (state) renderTransfers(); }
   if (value?.type === 'nearby-file-preview') { nativePreviewPending.get(value.id)?.(value); nativePreviewPending.delete(value.id); }
 });
+if (nativeBridge) {
+  $('desktop-notifications').hidden = false;
+  nativeBridge.postMessage({ type: 'nearby-desktop-settings', id: 'desktop-settings' });
+  $('receive-notifications').addEventListener('change', () => {
+    $('receive-notifications').disabled = true;
+    nativeBridge.postMessage({ type: 'nearby-desktop-settings', id: 'desktop-settings', receiveNotifications: $('receive-notifications').checked });
+  });
+}
 function nativePreview(id) {
   return new Promise(resolve => {
     const timer = setTimeout(() => { nativePreviewPending.delete(id); resolve(null); }, 10_000);
