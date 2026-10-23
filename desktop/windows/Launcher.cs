@@ -14,8 +14,8 @@ using Microsoft.Web.WebView2.WinForms;
 
 [assembly: System.Reflection.AssemblyTitle("Nearby")]
 [assembly: System.Reflection.AssemblyDescription("Передача файлов по локальной сети")]
-[assembly: System.Reflection.AssemblyVersion("0.6.5.0")]
-[assembly: System.Reflection.AssemblyFileVersion("0.6.5.0")]
+[assembly: System.Reflection.AssemblyVersion("0.6.6.0")]
+[assembly: System.Reflection.AssemblyFileVersion("0.6.6.0")]
 #if SERVER2016
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.6.2")]
 #endif
@@ -73,7 +73,10 @@ internal sealed class NearbyWindow : Form
     private readonly Button installUpdate = new Button();
     private readonly Button laterUpdate = new Button();
     private readonly ToolStripStatusLabel checkUpdate = new ToolStripStatusLabel("Проверить обновления");
-    private readonly NotifyIcon updateNotification = new NotifyIcon();
+    private readonly NotifyIcon trayIcon = new NotifyIcon();
+    private readonly ContextMenuStrip trayMenu = new ContextMenuStrip();
+    private FormWindowState restoreState = FormWindowState.Normal;
+    private bool inTray;
     private readonly System.Windows.Forms.Timer updateTimer = new System.Windows.Forms.Timer();
     private readonly CancellationTokenSource updateCancellation = new CancellationTokenSource();
     private DesktopUpdates updater;
@@ -89,8 +92,7 @@ internal sealed class NearbyWindow : Form
     internal void QueueShellFiles(string[] paths)
     {
         if (shuttingDown || !web.Enabled) return;
-        if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
-        Show(); Activate();
+        RestoreFromTray();
         foreach (string value in paths) {
             try {
                 if (!Path.IsPathRooted(value) || !File.Exists(value)) throw new IOException();
@@ -150,6 +152,7 @@ internal sealed class NearbyWindow : Form
         BackColor = Color.FromArgb(245, 247, 241);
         var iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Nearby.ico");
         if (File.Exists(iconPath)) Icon = new Icon(iconPath);
+        BuildTrayControls();
         loading.Text = "Запускаем Nearby…";
         loading.Dock = DockStyle.Fill;
         loading.TextAlign = ContentAlignment.MiddleCenter;
@@ -165,9 +168,44 @@ internal sealed class NearbyWindow : Form
         shellTimer.Start();
         FormClosing += delegate {
             shuttingDown = true; updateCancellation.Cancel(); updateTimer.Stop(); updateTimer.Dispose();
-            updateNotification.Dispose(); if (updater != null) updater.Dispose();
+            trayIcon.Visible = false; trayIcon.Dispose(); trayMenu.Dispose(); if (updater != null) updater.Dispose();
             shellTimer.Stop(); shellTimer.Dispose(); StopEngine();
         };
+    }
+
+    private void BuildTrayControls()
+    {
+        var open = new ToolStripMenuItem("Открыть Nearby") { Name = "nearby-tray-open" };
+        var updates = new ToolStripMenuItem("Проверить обновления") { Name = "nearby-tray-updates" };
+        var exit = new ToolStripMenuItem("Выход") { Name = "nearby-tray-exit" };
+        open.Click += delegate { RestoreFromTray(); };
+        updates.Click += async delegate { RestoreFromTray(); await CheckForUpdate(true); };
+        exit.Click += delegate { Close(); };
+        trayMenu.Items.Add(open); trayMenu.Items.Add(updates); trayMenu.Items.Add(new ToolStripSeparator()); trayMenu.Items.Add(exit);
+        trayIcon.Text = "Nearby — передача файлов";
+        trayIcon.Icon = Icon ?? SystemIcons.Application;
+        trayIcon.ContextMenuStrip = trayMenu;
+        trayIcon.MouseClick += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) RestoreFromTray(); };
+        trayIcon.BalloonTipClicked += delegate { ShowUpdate(); };
+        trayIcon.Visible = true;
+    }
+
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        if (shuttingDown || !IsHandleCreated) return;
+        if (WindowState == FormWindowState.Minimized) {
+            // Hiding the host must not dispose the WebView or stop its engine.
+            inTray = true; Hide();
+        } else if (!inTray) restoreState = WindowState;
+    }
+
+    internal void RestoreFromTray()
+    {
+        if (shuttingDown || IsDisposed) return;
+        inTray = false;
+        if (WindowState == FormWindowState.Minimized) WindowState = restoreState;
+        Show(); Activate();
     }
 
     private void BuildUpdateControls()
@@ -190,10 +228,7 @@ internal sealed class NearbyWindow : Form
         updatePanel.Controls.Add(updateText); updatePanel.Controls.Add(actions); Controls.Add(updatePanel);
         updatePanel.BringToFront(); footer.BringToFront();
         installUpdate.Click += async delegate { await InstallAvailableUpdate(); };
-        laterUpdate.Click += delegate { updatePanel.Visible = false; updateNotification.Visible = false; };
-        updateNotification.Text = "Обновление Nearby";
-        updateNotification.BalloonTipClicked += delegate { ShowUpdate(); };
-        updateNotification.Click += delegate { ShowUpdate(); };
+        laterUpdate.Click += delegate { updatePanel.Visible = false; };
         updateTimer.Interval = 6 * 60 * 60 * 1000;
         updateTimer.Tick += async delegate { await CheckForUpdate(false); };
     }
@@ -201,8 +236,7 @@ internal sealed class NearbyWindow : Form
     private void ShowUpdate()
     {
         if (shuttingDown) return;
-        if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
-        Show(); Activate(); updatePanel.Visible = true;
+        RestoreFromTray(); updatePanel.Visible = true;
     }
 
     private async Task CheckForUpdate(bool manual)
@@ -222,8 +256,7 @@ internal sealed class NearbyWindow : Form
             installUpdate.Text = downloadedUpdate == null ? "Обновить" : "Установить";
             updatePanel.Visible = true;
             if (showNativeNotifications) {
-                updateNotification.Icon = Icon ?? SystemIcons.Information; updateNotification.Visible = true;
-                updateNotification.ShowBalloonTip(8000, "Доступна Nearby " + found.DisplayVersion, "Нажмите, чтобы открыть предложение обновления.", ToolTipIcon.Info);
+                trayIcon.ShowBalloonTip(8000, "Доступна Nearby " + found.DisplayVersion, "Нажмите, чтобы открыть предложение обновления.", ToolTipIcon.Info);
             }
         } catch (Exception) {
             if (manual && !shuttingDown) MessageBox.Show(this, "Не удалось проверить обновления. Проверьте интернет и повторите позже.", "Обновление Nearby");
