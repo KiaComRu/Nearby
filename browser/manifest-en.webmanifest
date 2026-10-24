@@ -1,0 +1,33 @@
+{
+  "id": "./",
+  "name": "Nearby — free file transfer",
+  "short_name": "Nearby",
+  "description": "Send files from your phone to another phone, PC, computer or tablet for free. Nearby works on Android, iPhone and iPad via QR, link or ID. No sign-up.",
+  "lang": "en",
+  "start_url": "./?lang=en",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#080d18",
+  "theme_color": "#080d18",
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

@@ -3,6 +3,8 @@
   const languages = ['en', 'hi', 'zh-CN', 'es'];
   const supported = ['ru', ...languages];
   const rows = [
+    ['количество использований','number of uses','उपयोगों की संख्या','使用次数','número de usos'],
+    ['Каждое подключение двух устройств, включая повторные.','Each connection between two devices, including repeat connections.','दो डिवाइसों का हर कनेक्शन, दोबारा जुड़ना भी।','每次连接两台设备都会计数，包括重复连接。','Cada conexión entre dos dispositivos, incluidas las repetidas.'],
     ['Файлы принимаются автоматически после подключения.','Files are received automatically after connection.','कनेक्शन के बाद फ़ाइलें अपने आप प्राप्त होती हैं।','连接后自动接收文件。','Los archivos se reciben automáticamente tras conectar.'],
     ['Файл принят. Откройте его из списка, чтобы сохранить.','File received. Open it from the list to save it.','फ़ाइल मिल गई। सहेजने के लिए इसे सूची से खोलें।','文件已接收。请从列表中打开并保存。','Archivo recibido. Ábrelo desde la lista para guardarlo.'],
     ['Приём автоматический · до 100 МиБ. Откройте файл в списке, чтобы сохранить.','Automatic receiving · up to 100 MiB. Open a file from the list to save it.','अपने आप प्राप्त करें · 100 MiB तक। सहेजने के लिए सूची से फ़ाइल खोलें।','自动接收 · 每个文件最多 100 MiB。请从列表中打开并保存文件。','Recepción automática · hasta 100 MiB. Abre el archivo desde la lista para guardarlo.'],
@@ -245,9 +247,23 @@
   let remembered; try { remembered = localStorage.getItem('nearby-site-language'); } catch {}
   let browserLanguage = (navigator.languages || [navigator.language]).map(value => value.toLowerCase().split('-')[0]).find(value => ['ru','en','hi','zh','es'].includes(value));
   if (browserLanguage === 'zh') browserLanguage = 'zh-CN';
-  let language = supported.includes(query) ? query : supported.includes(remembered) ? remembered : browserLanguage || 'en';
+  const pageLanguage = document.documentElement.dataset.webSeoLocale;
+  let language = supported.includes(query) ? query : supported.includes(remembered) ? remembered : supported.includes(pageLanguage) ? pageLanguage : browserLanguage || 'en';
   const records = new WeakMap();
-  const protectedSelector = '.file-preview,.transfer-title,.transfer-peer,.device-name,#peer-name,#connection-id span,input,textarea,script,style,code,.web-language';
+  // Seed the original UI strings when PHP serves a translated HTML page, so
+  // later language changes preserve the same source strings and active session.
+  for (const element of document.querySelectorAll('[data-nearby-i18n]')) {
+    const source = JSON.parse(element.getAttribute('data-nearby-i18n'));
+    for (const [index, text] of Object.entries(source.text)) {
+      const node = element.childNodes[Number(index)];
+      if (node?.nodeType === Node.TEXT_NODE) records.set(node, {source:text, output:node.nodeValue});
+    }
+    const attributes = {};
+    for (const [name, text] of Object.entries(source.attributes)) attributes['@'+name] = {source:text, output:element.getAttribute(name)};
+    if (Object.keys(attributes).length) records.set(element, attributes);
+    element.removeAttribute('data-nearby-i18n');
+  }
+  const protectedSelector = '.file-preview,.transfer-title,.transfer-peer,.device-name,#peer-name,#connection-id span,input,textarea,script,style,code,.web-language,#free-file-transfer,[data-web-seo]';
   function translate(source) {
     if (language === 'ru') return source;
     const index = languages.indexOf(language), value = source.replace(/\s+/g, ' ').trim();
@@ -302,7 +318,8 @@
   function apply() {
     document.documentElement.lang = language; select.value = language;
     label.textContent = {ru:'Язык',en:'Language',hi:'भाषा','zh-CN':'语言',es:'Idioma'}[language];
-    document.title = language === 'ru' ? 'Nearby — передача в браузере' : catalogue.get('Nearby — передача в браузере')[languages.indexOf(language)];
+    if (window.NearbySEO) window.NearbySEO.apply(language);
+    else document.title = language === 'ru' ? 'Nearby — передача в браузере' : catalogue.get('Nearby — передача в браузере')[languages.indexOf(language)];
     walk(document.body);
   }
   select.addEventListener('change', () => {

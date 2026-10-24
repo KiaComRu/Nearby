@@ -228,7 +228,7 @@ async function join(value) {
     if (appClosed) { void requestApi('close', {}, { room: invite.room, token: result.token }); return; }
     if ((result.mode || 'lan') !== invite.mode) throw new Error('Режим приглашения изменён. Попросите новую полную ссылку.');
     const connection = register({ room: invite.room, token: result.token, role: 'guest', mode: invite.mode, relaySecret: invite.relaySecret }, result.hostName);
-    $('connection-mode').value = invite.mode; describeMode(); joinInvite = null; history.replaceState(null, '', location.pathname);
+    $('connection-mode').value = invite.mode; describeMode(); joinInvite = null; history.replaceState(null, '', location.pathname + location.search);
     showSetup(connection); status('Ожидаем подтверждения', `${result.hostName}: подтвердите подключение на первом устройстве.`); connection.start();
   } catch (error) { notice(error.message, true); $('join-invite').hidden = !joinInvite; $('join-invite').disabled = false; if (!setup) lockSetup(false); }
   finally { joining = false; }
@@ -401,14 +401,14 @@ if (['lan', 'internet', 'auto'].includes(initialParams.get('mode'))) $('connecti
 describeMode(); renderDevices();
 if (!window.isSecureContext || !crypto.subtle) { notice('Откройте Nearby по HTTPS в современном браузере. На Windows рекомендуем Chrome или Edge.', true); $('create').disabled = true; $('join-form').hidden = true; }
 else if (initialParams.has('room')) openInvitation(location.href);
-else if (location.hash) history.replaceState(null, '', location.pathname);
+else if (location.hash) history.replaceState(null, '', location.pathname + location.search);
 function openInvitation(value) {
   try {
     const invite = parseInvite(value); $('connection-mode').value = invite.mode; describeMode();
-    joinInvite = value; history.replaceState(null, '', location.pathname);
+    joinInvite = value; history.replaceState(null, '', location.pathname + location.search);
     $('create').hidden = true; $('join-form').hidden = true; $('join-invite').hidden = !confirmInvitation; $('join-invite').disabled = false;
     $('connect-card').querySelector('h2').textContent = 'Вас пригласили в Nearby';
     window.NearbyWorkspace.selectTab('connection');
     if (!confirmInvitation) void join(joinInvite);
-  } catch (error) { notice(error.message, true); history.replaceState(null, '', location.pathname); }
+  } catch (error) { notice(error.message, true); history.replaceState(null, '', location.pathname + location.search); }
 }

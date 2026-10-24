@@ -29,4 +29,5 @@ const policy = await readFile(root + '.htaccess','utf8');
 await writeFile(root + '.htaccess',policy.replace(/^Header always set Content-Security-Policy ".*"$/m, `Header always set Content-Security-Policy "${metrikaCsp}"`));
 await installMetrika(root,['index.html','offline.html'],{base:'./'});
 await import('./build-pwa.mjs');
+await import('./build-seo.mjs');
 console.log('Browser QR bundle and CSP-compatible Metrika counter built.');

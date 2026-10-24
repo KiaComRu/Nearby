@@ -1,8 +1,8 @@
 {
   "id": "./",
-  "name": "Nearby — передача файлов",
+  "name": "Nearby — бесплатная передача файлов",
   "short_name": "Nearby",
-  "description": "Передавайте файлы между телефоном и компьютером с подтверждением получателя.",
+  "description": "Бесплатно передать файл с телефона на телефон, ПК, компьютер или планшет через Nearby. Android, iPhone и iPad: QR, ссылка или ID, без регистрации.",
   "lang": "ru",
   "start_url": "./",
   "scope": "./",
@@ -11,8 +11,23 @@
   "theme_color": "#080d18",
   "prefer_related_applications": false,
   "icons": [
-    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
   ]
 }

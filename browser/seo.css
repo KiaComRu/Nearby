@@ -1,0 +1,9 @@
+.web-app .intro{flex-wrap:wrap;gap:4px 16px}.web-app .intro h1{max-width:100%;text-wrap:balance}.web-app .intro .lead{max-width:85ch;line-height:1.45}
+.web-search-guide{flex:0 0 auto;min-width:0;border:1px solid var(--line,#27374d);border-radius:12px;background:#101a2b;color:var(--text,#f0f5ff);font-size:12px}
+.web-search-guide>summary{padding:10px 13px;cursor:pointer;line-height:1.45;color:var(--cyan,#79e8ff);font-weight:600;overflow-wrap:anywhere}
+.web-search-content{max-height:min(50dvh,480px);overflow:auto;padding:0 14px 14px;line-height:1.65;overflow-wrap:anywhere}
+.web-search-content h2{margin:18px 0 8px;font-size:16px}.web-search-content p{margin:8px 0}.web-search-content ol{padding-left:22px}.web-search-content li{padding:3px 0}
+.web-search-question{border-top:1px solid var(--line,#27374d);padding:9px 0}.web-search-question>summary{cursor:pointer;font-weight:600;line-height:1.6}.web-search-question p{color:var(--muted,#9caac1)}
+.web-search-languages{display:flex;flex-wrap:wrap;gap:8px 14px;margin-top:16px}.web-search-languages a{color:var(--cyan,#79e8ff);text-decoration:underline;text-underline-offset:3px}
+.web-app #connection-pane:has(.web-search-guide[open]){overflow-y:auto}.web-app #connection-pane:has(.web-search-guide[open]) #start{flex:none}
+@media(max-width:680px){.web-search-guide>summary{padding:9px 11px;font-size:11px}.web-search-content{padding:0 11px 12px}.web-search-content h2{font-size:14px}}
