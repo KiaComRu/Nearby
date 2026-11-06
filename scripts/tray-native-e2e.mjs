@@ -25,7 +25,7 @@ async function connectedPage(){
   let result;for(let i=0;i<100;i++){result=desktop.contexts().flatMap(c=>c.pages()).find(p=>p.url().startsWith('http://127.0.0.1:'));if(result)break;await pause(200);}assert.ok(result);result.on('pageerror',error=>errors.push(error.message));return result;
 }
 async function saved(name,bytes){
-  for(let i=0;i<180;i++){const file=(await readdir(inbox)).find(n=>n.endsWith('-'+name));if(file){assert.equal(hash(await readFile(path.join(inbox,file))),hash(bytes));return;}await pause(250);}throw new Error('Background file was not saved: '+name);
+  for(let i=0;i<180;i++){const file=(await readdir(inbox)).find(n=>n===name);if(file){assert.equal(hash(await readFile(path.join(inbox,file))),hash(bytes));return;}await pause(250);}throw new Error('Background file was not saved: '+name);
 }
 try{
   for(let i=0;i<60;i++){try{await fetch(base);break;}catch{await pause(100);}}

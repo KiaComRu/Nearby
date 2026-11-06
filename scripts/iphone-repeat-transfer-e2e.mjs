@@ -82,7 +82,7 @@ try{
     if(kind==='windows-relay'){
       await phone.locator('#files').setInputFiles({name:'back.txt',mimeType:'text/plain',buffer:returned});
       await pc.locator('#incoming .file-row').filter({hasText:'back.txt'}).getByText('Получено и сохранено',{exact:true}).waitFor({state:'attached',timeout:60000});
-      const saved=(await readdir(app.inbox)).find(name=>name.endsWith('-back.txt'));
+      const saved=(await readdir(app.inbox)).find(name=>name==='back.txt');
       assert.equal(digest(await readFile(path.join(app.inbox,saved))),digest(returned));
     }else{
       const download=pc.waitForEvent('download');await phone.locator('#files').setInputFiles({name:'back.txt',mimeType:'text/plain',buffer:returned});

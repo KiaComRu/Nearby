@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
@@ -14,8 +16,8 @@ using Microsoft.Web.WebView2.WinForms;
 
 [assembly: System.Reflection.AssemblyTitle("Nearby")]
 [assembly: System.Reflection.AssemblyDescription("Передача файлов по локальной сети")]
-[assembly: System.Reflection.AssemblyVersion("0.6.8.0")]
-[assembly: System.Reflection.AssemblyFileVersion("0.6.8.0")]
+[assembly: System.Reflection.AssemblyVersion("0.6.9.0")]
+[assembly: System.Reflection.AssemblyFileVersion("0.6.9.0")]
 
 internal static class Program
 {
@@ -90,6 +92,9 @@ internal sealed class NearbyWindow : Form
     private bool checkingUpdate, downloadingUpdate;
     private string downloadedUpdate;
     private int activeDownloads;
+    private bool savingPeerShare;
+    private readonly HttpClient shareDownloads = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false, UseProxy = false });
+    private readonly HashSet<string> browserDownloadPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     private bool engineUpdateUnavailable;
     private readonly Func<string, DesktopUpdates> updateFactory;
     private readonly Action<ProcessStartInfo> startInstaller;
@@ -180,7 +185,7 @@ internal sealed class NearbyWindow : Form
         shellTimer.Start();
         FormClosing += delegate {
             shuttingDown = true; updateCancellation.Cancel(); updateTimer.Stop(); updateTimer.Dispose();
-            trayIcon.Visible = false; trayIcon.Dispose(); trayMenu.Dispose(); if (updater != null) updater.Dispose();
+            trayIcon.Visible = false; trayIcon.Dispose(); trayMenu.Dispose(); if (updater != null) updater.Dispose(); shareDownloads.Dispose();
             shellTimer.Stop(); shellTimer.Dispose(); StopEngine();
         };
     }
@@ -491,6 +496,20 @@ internal sealed class NearbyWindow : Form
                             } catch { saved = false; }
                         }
                         web.CoreWebView2.PostWebMessageAsJson(serializer.Serialize(new { type = "nearby-desktop-settings", receiveNotifications = receiveNotifications, saved = saved }));
+                    } else if (type == "nearby-save-share") {
+                        bool ok = false;
+                        if (!savingPeerShare && Regex.IsMatch(id, @"\A[a-f0-9-]{36}\z")) {
+                            savingPeerShare = true; activeDownloads++;
+                            try {
+                                string name = value["name"] as string;
+                                string saved = await SavePeerShare(receive, value["url"] as string, name, Convert.ToInt64(value["size"]));
+                                ok = true;
+                                localFiles[id] = saved;
+                                NotifyReceivedFile(id, name);
+                            } catch { /* Report failure to the row; the next queued file can still be received. */ }
+                            finally { activeDownloads--; savingPeerShare = false; }
+                        }
+                        if (!shuttingDown) web.CoreWebView2.PostWebMessageAsJson(serializer.Serialize(new { type = "nearby-download-complete", id = id, ok = ok }));
                     } else if (type == "nearby-register-file") {
                         bool ok = false;
                         string objectId = null;
@@ -551,6 +570,7 @@ internal sealed class NearbyWindow : Form
                 e.DownloadOperation.StateChanged += delegate {
                     if (!finished && e.DownloadOperation.State != CoreWebView2DownloadState.InProgress) {
                         finished = true; activeDownloads--;
+                        if (savedPath != null) lock (browserDownloadPaths) browserDownloadPaths.Remove(savedPath);
                         if (recordId != null && savedPath != null && e.DownloadOperation.State == CoreWebView2DownloadState.Completed) {
                             NotifyReceivedFile(recordId, receivedName);
                             if (localFiles.Count < 2000) localFiles[recordId] = savedPath;
@@ -563,8 +583,12 @@ internal sealed class NearbyWindow : Form
                     // The connected device already has permission to exchange files.
                     // A unique destination prevents replacing an existing download.
                     Directory.CreateDirectory(receive);
-                    e.ResultFilePath = Path.Combine(receive, Guid.NewGuid().ToString() + "-" + Path.GetFileName(e.ResultFilePath));
-                    savedPath = e.ResultFilePath;
+                    lock (browserDownloadPaths) {
+                        int index = 0;
+                        do { savedPath = DownloadPath(receive, receivedName, index++); }
+                        while (File.Exists(savedPath) || Directory.Exists(savedPath) || !browserDownloadPaths.Add(savedPath));
+                    }
+                    e.ResultFilePath = savedPath;
                     e.Handled = true;
                 } finally { deferral.Complete(); }
             };
@@ -585,6 +609,54 @@ internal sealed class NearbyWindow : Form
         {
             StopEngine(); loading.Text = "Не удалось запустить Nearby.\n\n" + error.Message;
         }
+    }
+
+    private static string DownloadPath(string folder, string name, int index)
+    {
+        int extension = name.LastIndexOf('.');
+        if (extension <= 0) extension = name.Length;
+        return Path.Combine(folder, index == 0 ? name : name.Insert(extension, " (" + index + ")"));
+    }
+
+    private async Task<string> SavePeerShare(string folder, string url, string name, long size)
+    {
+        if (size < 0 || size > 100L * 1024 * 1024 * 1024 || String.IsNullOrWhiteSpace(name) || Encoding.UTF8.GetByteCount(name) > 180 ||
+            name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || name.EndsWith(".", StringComparison.Ordinal) || name.EndsWith(" ", StringComparison.Ordinal) ||
+            Regex.IsMatch(name, @"^(?:con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³]|conin\$|conout\$) *(?:\.|$)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant) ||
+            String.IsNullOrEmpty(url) || !Regex.IsMatch(url, @"\A/api/peer/download\?ticket=[a-f0-9]{48}\z"))
+            throw new IOException("Недопустимое имя, размер или ссылка файла.");
+
+        string temporary = Path.Combine(folder, Guid.NewGuid().ToString("N") + ".part");
+        try {
+            using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(updateCancellation.Token)) {
+                timeout.CancelAfter(60000);
+                using (var response = await shareDownloads.GetAsync(origin + url, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false)) {
+                    if (!response.IsSuccessStatusCode || response.Content.Headers.ContentLength != size) throw new IOException("Размер файла не совпадает или ссылка истекла.");
+                    using (var input = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
+                    using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, true)) {
+                        var buffer = new byte[65536]; long bytes = 0;
+                        while (true) {
+                            timeout.CancelAfter(60000);
+                            int read = await input.ReadAsync(buffer, 0, buffer.Length, timeout.Token).ConfigureAwait(false);
+                            if (read == 0) break;
+                            bytes += read;
+                            if (bytes > size) throw new IOException("Размер полученного файла больше заявленного.");
+                            await output.WriteAsync(buffer, 0, read, timeout.Token).ConfigureAwait(false);
+                        }
+                        if (bytes != size) throw new IOException("Файл получен не полностью.");
+                    }
+                }
+                timeout.Token.ThrowIfCancellationRequested();
+            }
+            lock (browserDownloadPaths) {
+                for (int index = 0; ; index++) {
+                    string destination = DownloadPath(folder, name, index);
+                    if (browserDownloadPaths.Contains(destination) || File.Exists(destination) || Directory.Exists(destination)) continue;
+                    try { File.Move(temporary, destination); return destination; }
+                    catch (IOException) { if (!File.Exists(destination) && !Directory.Exists(destination)) throw; }
+                }
+            }
+        } finally { try { File.Delete(temporary); } catch (IOException) {} catch (UnauthorizedAccessException) {} }
     }
 
     private void StopEngine()

@@ -71,7 +71,7 @@ try {
     await client.locator('#queue .file-row').filter({ hasText: name }).getByText('Получено и сохранено на компьютере', { exact: true }).waitFor({ state: 'attached' });
     await owner.locator('#tab-transfer[aria-selected=true]').waitFor();
     assert.equal(await owner.getByRole('button', { name: 'Принять', exact: true }).count(), 0);
-    const saved = (await readdir(first.inbox)).find(file => file.endsWith('-' + name));
+    const saved = (await readdir(first.inbox)).find(file => file===name);
     assert.equal(hash(await readFile(path.join(first.inbox, saved))), hash(data));
     const downloading = client.waitForEvent('download');
     await owner.locator('#files').setInputFiles({ name: 'back-' + name, mimeType: 'application/octet-stream', buffer: data });

@@ -45,7 +45,7 @@ try {
     await client.locator('#files').setInputFiles({ name, mimeType: 'application/octet-stream', buffer: data });
     const incoming = owner.locator('#incoming .file-row').filter({ hasText: name });
     await client.locator('#queue .file-row').filter({ hasText: name }).getByText('Получено и сохранено на компьютере', { exact: true }).waitFor({ state: 'attached' });
-    const saved = (await readdir(first.inbox)).find(file => file.endsWith('-' + name));
+    const saved = (await readdir(first.inbox)).find(file => file===name);
     assert.equal(digest(await readFile(path.join(first.inbox, saved))), digest(data));
     const downloading = client.waitForEvent('download');
     await owner.locator('#files').setInputFiles({ name: 'back-' + name, mimeType: 'application/octet-stream', buffer: data });

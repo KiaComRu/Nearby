@@ -17,7 +17,7 @@ test('desktop update waits for accepted files, freezes new transfers and can saf
     assert.equal(app.prepareUpdate(),false,'An already accepted file must finish before updating');
     const uploaded = await fetch(origin+`/api/offers/${offer.id}/upload`,{method:'POST',headers:{Authorization:`Bearer ${joined.token}`},body:'kept'});
     assert.equal(uploaded.status,201); await uploaded.arrayBuffer();
-    const saved=(await readdir(app.inbox)).find(name=>name.endsWith('-kept.txt'));
+    const saved=(await readdir(app.inbox)).find(name=>name === 'kept.txt');
     assert.equal(await readFile(path.join(app.inbox,saved),'utf8'),'kept');
     assert.equal(app.prepareUpdate(),true);
     assert.equal((await request('/api/offers',joined.token,{name:'later.txt',size:1})).status,503);

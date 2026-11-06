@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createApp } from '../server.mjs';
@@ -42,8 +42,8 @@ test('two independent PC engines pair, transfer binary and empty files both ways
       assert.equal((await request(second, `/api/peer/remote/api/offers/${offer.id}`, { method: 'POST', data: { action: 'accept' } })).status, 403);
       const sent = await request(second, `/api/peer/remote/api/offers/${offer.id}/upload`, { method: 'POST', body: bytes });
       assert.equal(sent.status, 201); assert.equal((await sent.json()).state, 'completed');
-      const saved = (await readdir(first.inbox)).filter(file => file.endsWith('-ПК-файл.bin'));
-      assert.ok((await Promise.all(saved.map(file => readFile(path.join(first.inbox, file))))).some(content => content.equals(bytes)));
+      const saved = bytes.length ? 'ПК-файл.bin' : 'ПК-файл (1).bin';
+      assert.deepEqual(await readFile(path.join(first.inbox, saved)), bytes);
       const share = await (await request(first, `/api/shares?name=${encodeURIComponent('ответ-ПК.bin')}&size=${bytes.length}`, { method: 'POST', body: bytes })).json();
       const visible = await (await request(second, '/api/peer/remote/api/state')).json();
       assert.ok(visible.shares.some(file => file.id === share.id)); assert.equal(visible.offers[0].device, connection.device);

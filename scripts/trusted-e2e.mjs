@@ -48,7 +48,7 @@ try {
   for (const [name, content] of [['secure-peer.bin', bytes], ['secure-empty.txt', Buffer.alloc(0)]]) {
     await client.locator('#files').setInputFiles({ name, mimeType: 'application/octet-stream', buffer: content });
     await client.locator('#queue .file-row').filter({ hasText: name }).getByText('Получено и сохранено на компьютере', { exact: true }).waitFor({ state: 'attached' });
-    const file = (await readdir(first.inbox)).find(value => value.endsWith('-' + name)); assert.equal(hash(await readFile(path.join(first.inbox, file))), hash(content));
+    const file = (await readdir(first.inbox)).find(value => value===name); assert.equal(hash(await readFile(path.join(first.inbox, file))), hash(content));
     const downloading = client.waitForEvent('download');
     await host.locator('#files').setInputFiles({ name: 'back-' + name, mimeType: 'application/octet-stream', buffer: content });
     const receiving = client.locator('#shared .file-row').filter({ hasText: 'back-' + name });

@@ -100,7 +100,7 @@ test('authenticated connection accepts files automatically; another guest cannot
   assert.equal(sent.status, 201);
   const state = await sent.json();
   assert.equal(state.state, 'completed'); assert.equal(state.received, 5);
-  const file = (await readdir(app.inbox)).find(name => name.endsWith('-approved.txt'));
+  const file = (await readdir(app.inbox)).find(name => name === 'approved.txt');
   assert.equal(await readFile(path.join(app.inbox, file), 'utf8'), 'hello');
   assert.equal((await call(`/api/offers/${incoming.id}/upload`, { method: 'POST', body: 'hello' })).status, 409);
 });
@@ -115,7 +115,7 @@ test('wrong size fails without a partial file', async () => {
   const incoming = await offer('wrong-size.txt', 20);
   await accept(incoming.id);
   assert.equal((await call(`/api/offers/${incoming.id}/upload`, { method: 'POST', body: 'short' })).status, 400);
-  assert.ok(!(await readdir(app.inbox)).some(name => name.endsWith('.part') || name.endsWith('-wrong-size.txt')));
+  assert.ok(!(await readdir(app.inbox)).some(name => name.endsWith('.part') || name === 'wrong-size.txt'));
 });
 
 test('two files with the same name are preserved; empty files work', async () => {
@@ -123,7 +123,8 @@ test('two files with the same name are preserved; empty files work', async () =>
     const incoming = await offer('duplicate.txt', data.length); await accept(incoming.id);
     assert.equal((await call(`/api/offers/${incoming.id}/upload`, { method: 'POST', body: data })).status, 201);
   }
-  assert.equal((await readdir(app.inbox)).filter(name => name.endsWith('-duplicate.txt')).length, 2);
+  assert.equal(await readFile(path.join(app.inbox, 'duplicate.txt'), 'utf8'), 'first');
+  assert.equal(await readFile(path.join(app.inbox, 'duplicate (1).txt'), 'utf8'), 'second');
   const incoming = await offer('empty.txt', 0); await accept(incoming.id);
   assert.equal((await call(`/api/offers/${incoming.id}/upload`, { method: 'POST', body: '' })).status, 201);
 });
@@ -145,7 +146,7 @@ test('interrupted upload removes the temporary file and records failure', async 
     await new Promise(resolve => setTimeout(resolve, 25));
   }
   assert.equal(completed, true);
-  assert.ok(!(await readdir(app.inbox)).some(name => name.endsWith('.part') || name.endsWith('-interrupted.bin')));
+  assert.ok(!(await readdir(app.inbox)).some(name => name.endsWith('.part') || name === 'interrupted.bin'));
 });
 
 test('host shares binary data, guest downloads with a single-use ticket, host removes it', async () => {

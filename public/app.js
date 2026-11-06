@@ -13,6 +13,7 @@ let addressSignature;
 let sending = false;
 window.nearbyUpdateBusy = () => sending || !state ||
   state.offers.some(offer => ['pending', 'accepted', 'uploading'].includes(offer.state)) ||
+  [...records.values()].some(record => record.nativeDownloadStatus) ||
   document.querySelector('#shell-send')?.open === true || internetClient.busy() || internetBufferedBytes > 0;
 let peerMode = false;
 let connectionAvailable = false;
@@ -22,6 +23,8 @@ let discoverySignature = '', discoveryRefreshing = false, diagnoseGeneration = 0
 const selectedDiscoveryAddresses = new Map();
 let trustState = { enabled: false, devices: [], requests: [] }, discoveredDevices = [], trustSignature = '', trustRefreshing = false;
 const incomingSeen = new Set(), automaticDownloads = new Map();
+const nativeDownloads = new Map();
+let nativeDownloadQueue = Promise.resolve();
 const pairingSeen = new Set();
 let downloadedShares = new Set();
 try { downloadedShares = new Set(JSON.parse(sessionStorage.getItem('nearby-downloaded-shares') || '[]')); } catch {}
@@ -124,7 +127,14 @@ nativeBridge?.addEventListener('message', event => {
     $('receive-notifications-hint').textContent = value.saved === false ? 'Не удалось сохранить настройку. Повторите попытку.' : 'Показывать всплывающее уведомление после сохранения файла, когда Nearby свёрнут в трей.';
   }
   if (value?.type === 'nearby-file-registered') { nativePending.get(value.id)?.(value.ok); nativePending.delete(value.id); if (value.ok) nativeFiles.add(value.id); }
-  if (value?.type === 'nearby-download-complete' && value.ok) { nativeFiles.add(value.id); rendered = ''; if (state) renderTransfers(); }
+  if (value?.type === 'nearby-download-complete') {
+    const pending = nativeDownloads.get(value.id);
+    if (value.ok) nativeFiles.add(value.id);
+    if (pending) {
+      if (value.ok) pending.resolve();
+      else pending.reject(new Error(value.error || 'Не удалось сохранить файл.'));
+    }
+  }
   if (value?.type === 'nearby-file-preview') { nativePreviewPending.get(value.id)?.(value); nativePreviewPending.delete(value.id); }
 });
 if (nativeBridge) {
@@ -376,7 +386,7 @@ function renderTransfers() {
     if ([...records.values()].some(record => record.localSend && record.serverKind === 'offer' && record.serverId === offer.id)) continue;
     keepRecord(`peer-offer:${peerTarget.id}:${offer.id}`, { ...offer, serverId: offer.id, serverKind: 'offer', direction: 'outgoing', device: peerTarget.name, target: peerTarget, status: statusNames[offer.state] || offer.state, busy: ['pending','accepted','uploading'].includes(offer.state), failed: ['failed','rejected','expired'].includes(offer.state) });
   }
-  for (const record of records.values()) { if (record.downloadError) record.status = record.downloadError; if (nativeFiles.has(record.serverId)) record.status = 'Получено и сохранено'; }
+  for (const record of records.values()) { if (record.nativeDownloadStatus) record.status = record.nativeDownloadStatus; if (record.downloadError) record.status = record.downloadError; if (nativeFiles.has(record.serverId)) record.status = 'Получено и сохранено'; }
   const signature = JSON.stringify([...records.values()].map(({ key, status, busy, failed, received, serverId, localStored }) => [key, status, busy, failed, received, serverId, localStored, nativeFiles.has(key), nativeFiles.has(serverId)]));
   if (signature === rendered) return; rendered = signature;
   for (const body of [$('queue'), $('incoming'), $('shared')]) for (const element of [...body.children]) if (!records.has(element.dataset.record)) element.remove();
@@ -419,10 +429,32 @@ function receiveShare(record) {
   automaticDownloads.set(record.serverId, true);
   void downloadShare(record).catch(error => { record.status = error.message; record.downloadError = error.message; record.failed = true; rendered = ''; renderTransfers(); });
 }
+function rememberDownloaded(id) {
+  downloadedShares.add(id);
+  try { sessionStorage.setItem('nearby-downloaded-shares', JSON.stringify([...downloadedShares].slice(-200))); } catch {}
+}
 async function downloadShare(record) {
+  if (nativeBridge && record.target?.kind === 'peer') {
+    if (record.nativeDownloadStatus || nativeFiles.has(record.serverId)) return;
+    record.busy = true; record.failed = false; record.downloadError = null; record.nativeDownloadStatus = 'В очереди на получение';
+    const save = nativeDownloadQueue.then(async () => {
+      record.nativeDownloadStatus = 'Сохраняем файл…'; rendered = ''; renderTransfers();
+      const ticket = await api(targetPrefix(record.target) + `/api/shares/${record.serverId}/ticket`, { method: 'POST', target: record.target });
+      await new Promise((resolve, reject) => {
+        nativeDownloads.set(record.serverId, { resolve, reject });
+        nativeBridge.postMessage({ type: 'nearby-save-share', id: record.serverId, url: ticket.url, name: record.name, size: record.size });
+      });
+      rememberDownloaded(record.serverId);
+      window.NearbyWorkspace.incoming();
+    }).catch(error => {
+      record.downloadError = error.message; record.failed = true; throw error;
+    }).finally(() => { nativeDownloads.delete(record.serverId); record.nativeDownloadStatus = null; record.busy = false; rendered = ''; renderTransfers(); });
+    nativeDownloadQueue = save.catch(() => {});
+    return save;
+  }
   const ticket = await api(targetPrefix(record.target) + `/api/shares/${record.serverId}/ticket`, { method: 'POST', target: record.target });
   const link = document.createElement('a'); link.href = ticket.url + '&nearbyFile=' + encodeURIComponent(record.serverId); link.download = record.name; document.body.append(link); link.click(); link.remove();
-  downloadedShares.add(record.serverId); try { sessionStorage.setItem('nearby-downloaded-shares', JSON.stringify([...downloadedShares].slice(-200))); } catch {}
+  rememberDownloaded(record.serverId);
   record.failed = false; record.downloadError = null; record.status = 'Загрузка началась автоматически'; window.NearbyWorkspace.incoming(); rendered = ''; renderTransfers();
 }
 async function openRecord(record) {
@@ -652,15 +684,19 @@ async function sendFiles(files) {
   if (!state || !connectionAvailable || !target || sending || !files.length) return;
   sending = true; renderConnection();
   try {
-    for (const [index, file] of files.entries()) {
-      if (!targets.some(current => current.id === target.id && current.kind === target.kind)) break;
+    const batch = files.map((file, index) => {
       const key = `local-${Date.now()}-${++recordSequence}`;
-      const record = keepRecord(key, { name: file.name, size: file.size, direction: 'outgoing', device: target.name, target, file, localSend: true, busy: true, status: 'Подготовка', received: 0 });
-      rendered = ''; renderTransfers();
+      const record = keepRecord(key, { name: file.name, size: file.size, direction: 'outgoing', device: target.name, target, file, localSend: true, busy: true, status: 'В очереди на отправку', received: 0 });
+      return { file, index, key, record };
+    });
+    rendered = ''; renderTransfers();
+    for (const { file, index, key, record } of batch) {
       try {
+        if (!targets.some(current => current.id === target.id && current.kind === target.kind)) throw new Error('Получатель отключился. Подключитесь снова и повторите отправку.');
+        record.status = 'Подготовка'; rendered = ''; renderTransfers();
         await registerNativeFile(key, index);
         if (file.size > target.maxSize) throw new Error(`Максимальный размер файла: ${sizes(target.maxSize)}.`);
-        if (target.kind === 'internet') { await sendInternetRecord(record,target,file); await refresh(); continue; }
+        if (target.kind === 'internet') { await sendInternetRecord(record,target,file); await refresh().catch(() => {}); continue; }
         let url;
         if (target.kind === 'client') {
           record.serverKind = 'share'; url = `/api/shares?recipient=${encodeURIComponent(target.id)}&name=${encodeURIComponent(file.name)}&size=${file.size}`;
@@ -679,8 +715,8 @@ async function sendFiles(files) {
         let lastUpdate = 0;
         const uploaded = await upload(url, file, bytes => { if (Date.now() - lastUpdate < 200 && bytes < file.size) return; lastUpdate = Date.now(); record.received = bytes; record.status = bytes >= file.size ? 'Проверяем сохранение на компьютере…' : `Отправляем: ${sizes(bytes)} / ${sizes(file.size)}`; rendered = ''; renderTransfers(); }, target);
         record.serverId = uploaded.id; if (target.kind === 'client') records.delete('share:' + uploaded.id); record.localStored = target.kind === 'client'; record.busy = false; record.status = target.kind === 'client' ? 'Ожидаем получение устройством' : 'Получено и сохранено на компьютере';
-        rendered = ''; await refresh();
-      } catch (error) { record.busy = false; record.failed = true; record.status = error.message || 'Соединение прервано.'; rendered = ''; renderTransfers(); break; }
+        rendered = ''; await refresh().catch(() => {});
+      } catch (error) { record.busy = false; record.failed = true; record.status = error.message || 'Соединение прервано.'; rendered = ''; renderTransfers(); }
     }
   } finally { sending = false; $('files').value = ''; renderConnection(); rendered = ''; renderTransfers(); }
 }

@@ -35,7 +35,7 @@ try {
   const selectedImage=path.join(directory,'selected-image.webp');await writeFile(selectedImage,image);await page.waitForFunction(()=>!document.querySelector('#files').disabled);
   const imageDownload=guest.waitForEvent('download');await cdp.send('DOM.setFileInputFiles',{nodeId:node.nodeId,files:[selectedImage]});await imageDownload;
   await checkFilePresentation(page,page.locator('#queue .file-row').filter({hasText:'selected-image.webp'}),{image:true});
-  remote = await createApp({host:'127.0.0.1',port:0,storage:path.join(directory,'remote'),statistics:false,trustedLan:false,discovery:false}); const remoteOrigin=`http://127.0.0.1:${remote.port}`;
+  remote = await createApp({host:'127.0.0.1',port:0,storage:path.join(directory,'remote'),maxSize: 32 * 1024,statistics:false,trustedLan:false,discovery:false}); const remoteOrigin=`http://127.0.0.1:${remote.port}`;
   await page.locator('#tab-connection').click(); await selectDesktopLan(page); await page.locator('#pc-address').fill(remoteOrigin+'/#pin='+remote.pin); await page.locator('#pc-connect-submit').click(); await page.locator('#tab-devices').waitFor();
   const targets = await (await fetch(remoteOrigin+'/api/send-targets',{headers:{Authorization:`Bearer ${remote.adminToken}`}})).json();
   const body = Buffer.from('Received through real Windows WebView2.'); const sent = await fetch(remoteOrigin+`/api/shares?recipient=${targets.targets[0].id}&name=from-peer.txt&size=${body.length}`,{method:'POST',headers:{Authorization:`Bearer ${remote.adminToken}`},body}); const share=await sent.json(); assert.equal(sent.status,201);
@@ -53,7 +53,32 @@ try {
   await page.screenshot({path:'artifacts/preview-status-native.png'});await page.keyboard.press('Escape');
   await page.evaluate(()=>window.chrome.webview.postMessage({type:'nearby-file-preview',id:'unregistered-file'}));
   await page.waitForFunction(()=>window.testNativeMessages.some(m=>m.type==='nearby-file-preview'&&m.id==='unregistered-file'&&m.base64===null));
-  assert.deepEqual(errors,[]); const result={passed:true,realWinFormsWebView2:true,selectedOriginalPath:true,automaticDownloadMappedToFile:true,opensSavedFile:true,unknownPathsRejected:true,historyRemovalPreservesFile:true,originalAndReceivedWebpThumbnails:true,statusHoverClickKeyboard:true,unknownPreviewPathsRejected:true,errors};await writeFile('artifacts/desktop-native-parity-verification.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result));
+  const archive = 'Тестовый архив Л.Н.rar';
+  const batch = [archive, 'batch 2.txt', 'batch 3.txt', 'batch 4.txt', 'batch 5.txt'];
+  const localFiles = await Promise.all(batch.map(async name => { const file = path.join(directory,name); await writeFile(file,name); return file; }));
+  const oversized = path.join(directory,'oversized.bin'); await writeFile(oversized,Buffer.alloc(32769));
+  await page.locator('#tab-devices').click();
+  const peerTarget = page.locator('input[name=send-target]').first();
+  await peerTarget.check(); await page.locator('#tab-transfer').click();
+  await cdp.send('DOM.setFileInputFiles',{nodeId:node.nodeId,files:[localFiles[0],oversized,...localFiles.slice(1)]});
+  await page.waitForFunction(() => !sending && [...records.values()].some(r=>r.name==='oversized.bin' && r.failed));
+  for(const name of batch) assert.equal(await readFile(path.join(remote.inbox,name),'utf8'),name);
+
+  // The receiver must save all queued files even if the browser blocks downloads.
+  await browserCDP.send('Browser.setDownloadBehavior',{behavior:'deny',eventsEnabled:true});
+  const receivedDirectory = path.join(directory,'received');
+  await writeFile(path.join(receivedDirectory,archive),'keep existing');
+  const incomingBatch = [];
+  for (const name of batch) {
+    const body = Buffer.from(name === 'batch 5.txt' ? '' : 'incoming '+name);
+    const response = await fetch(remoteOrigin+`/api/shares?recipient=${targets.targets[0].id}&name=${encodeURIComponent(name)}&size=${body.length}`,{method:'POST',headers:{Authorization:`Bearer ${remote.adminToken}`},body});
+    assert.equal(response.status,201); incomingBatch.push({id:(await response.json()).id, name, body});
+  }
+  await page.waitForFunction(ids=>ids.every(id=>nativeFiles.has(id)),incomingBatch.map(file=>file.id));
+  assert.equal(await readFile(path.join(receivedDirectory,archive),'utf8'),'keep existing');
+  for(const {name,body} of incomingBatch) assert.deepEqual(await readFile(path.join(receivedDirectory,name===archive?'Тестовый архив Л.Н (1).rar':name)),body);
+  assert.ok(!(await readdir(receivedDirectory)).some(name=>name.endsWith('.part')));
+  assert.deepEqual(errors,[]); const result={passed:true,version:JSON.parse(await readFile('package.json','utf8')).version,realWinFormsWebView2:true,selectedOriginalPath:true,automaticDownloadMappedToFile:true,opensSavedFile:true,unknownPathsRejected:true,historyRemovalPreservesFile:true,originalAndReceivedWebpThumbnails:true,statusHoverClickKeyboard:true,unknownPreviewPathsRejected:true,fiveFilesBothWays:true,continuedAfterFailedFile:true,originalNamesAndCollision:true,browserDownloadsDenied:true,errors};await writeFile('artifacts/desktop-native-parity-verification.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result));
 } finally {
   if(native?.stdin.writable)native.stdin.end('stop\n'); if(native&&native.exitCode===null){const timer=setTimeout(()=>native.kill(),10000);await exited;clearTimeout(timer);}
   await browser?.close().catch(()=>{}); await guestBrowser?.close(); await remote?.close();

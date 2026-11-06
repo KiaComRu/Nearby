@@ -54,7 +54,7 @@ try{
         const data=await row.locator('a.open-transfer').evaluate(async a=>Array.from(new Uint8Array(await(await fetch(a.href)).arrayBuffer())));assert.equal(hash(Buffer.from(data)),hash(bytes));
       }else{
         await guest.locator('#incoming .file-row').filter({hasText:name}).getByText('Получено и сохранено',{exact:true}).waitFor({state:'attached',timeout:60000});
-        const saved=(await readdir(apps[1].inbox)).find(file=>file.endsWith('-'+name));assert.equal(hash(await readFile(path.join(apps[1].inbox,saved))),hash(bytes));
+        const saved=(await readdir(apps[1].inbox)).find(file=>file===name);assert.equal(hash(await readFile(path.join(apps[1].inbox,saved))),hash(bytes));
       }
       await owner.waitForFunction(()=>!document.querySelector('#files').disabled);
     }
@@ -68,7 +68,7 @@ try{
     await selectPane(guest,'transfer');const returned=Buffer.from('automatic reverse '+kind),name='reverse-'+kind+'.txt';
     await guest.locator('#files').setInputFiles({name,mimeType:'text/plain',buffer:returned});
     await owner.locator('#incoming .file-row').filter({hasText:name}).getByText('Получено и сохранено',{exact:true}).waitFor({state:'attached',timeout:60000});
-    const saved=(await readdir(apps[0].inbox)).find(file=>file.endsWith('-'+name));assert.equal(hash(await readFile(path.join(apps[0].inbox,saved))),hash(returned));
+    const saved=(await readdir(apps[0].inbox)).find(file=>file===name);assert.equal(hash(await readFile(path.join(apps[0].inbox,saved))),hash(returned));
     await selectPane(owner,'connection');await owner.screenshot({path:'artifacts/desktop-auto-'+kind+'.png'});
     // Offline legacy connection stays explicitly accessible, with one visible QR.
     await openSettings(owner);await owner.locator('#connection-mode').selectOption('lan');await owner.locator('#connection-settings [data-close-settings]').last().click();assert.ok(await owner.locator('#connection').isVisible());assert.ok(await owner.locator('#internet-option').isHidden());

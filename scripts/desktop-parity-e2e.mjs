@@ -40,7 +40,7 @@ try {
   await choose(second, ownerTarget.name);
   const bytes = randomBytes(66001); await second.locator('#files').setInputFiles({ name: 'to-owner.bin', mimeType: 'application/octet-stream', buffer: bytes });
   const received = owner.locator('#incoming .file-row').filter({ hasText: 'to-owner.bin' }); await received.getByText('Получено и сохранено', { exact: true }).waitFor({ state: 'attached' });
-  const saved = (await readdir(firstApp.inbox)).find(name => name.endsWith('-to-owner.bin')); assert.equal(digest(await readFile(path.join(firstApp.inbox, saved))), digest(bytes));
+  const saved = (await readdir(firstApp.inbox)).find(name => name==='to-owner.bin'); assert.equal(digest(await readFile(path.join(firstApp.inbox, saved))), digest(bytes));
   assert.equal(await received.locator('td').count(), 4); assert.ok(Date.parse(await received.locator('time').getAttribute('datetime')) > 0);
   const cells = await received.locator('td').evaluateAll(nodes => nodes.map(n => ({ x: n.getBoundingClientRect().x, y: n.getBoundingClientRect().y }))); assert.ok(cells.every(c => c.y === cells[0].y));
   await received.getByRole('button', { name: 'Открыть', exact: true }).click(); assert.equal(opened.at(-1), path.join(firstApp.inbox, saved));
@@ -48,7 +48,7 @@ try {
   // The second PC keeps receiving from its phone while the upstream PC remains selected.
   const incomingPhone = Buffer.from('From phone while another recipient is selected.'); await phone.locator('#files').setInputFiles({ name: 'phone-to-second.txt', mimeType: 'text/plain', buffer: incomingPhone });
   await second.locator('#incoming .file-row').filter({ hasText: 'phone-to-second.txt' }).getByText('Получено и сохранено', { exact: true }).waitFor({ state: 'attached' }); assert.equal(await second.locator('#recipient-name').textContent(), ownerTarget.name);
-  const phoneSaved = (await readdir(secondApp.inbox)).find(name => name.endsWith('-phone-to-second.txt')); assert.equal(await readFile(path.join(secondApp.inbox, phoneSaved), 'utf8'), incomingPhone.toString());
+  const phoneSaved = (await readdir(secondApp.inbox)).find(name => name==='phone-to-second.txt'); assert.equal(await readFile(path.join(secondApp.inbox, phoneSaved), 'utf8'), incomingPhone.toString());
   const image = Buffer.from(await phone.evaluate(() => { const canvas=document.createElement('canvas'); canvas.width=120;canvas.height=80;const context=canvas.getContext('2d');context.fillStyle='#168956';context.fillRect(0,0,120,80);context.fillStyle='#fff';context.fillRect(20,20,80,40);return canvas.toDataURL('image/png').split(',')[1]; }), 'base64');
   await phone.locator('#files').setInputFiles({ name: 'local-preview.png', mimeType: 'image/png', buffer: image });
   const imageRow = second.locator('#incoming .file-row').filter({ hasText: 'local-preview.png' });

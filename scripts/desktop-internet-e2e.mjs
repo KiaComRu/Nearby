@@ -64,7 +64,7 @@ try {
   async function transfer(from,to,index,name,data){
     await selectPane(from,'transfer');await from.locator('#files').setInputFiles({name,mimeType:'application/octet-stream',buffer:data});
     const row=to.locator('#incoming .file-row').filter({hasText:name});await row.getByText('Получено и сохранено',{exact:true}).waitFor({state:'attached',timeout:60000});
-    const saved=(await readdir(apps[index].inbox)).find(n=>n.endsWith('-'+name));assert.equal(digest(await readFile(path.join(apps[index].inbox,saved))),digest(data));
+    const saved=(await readdir(apps[index].inbox)).find(n=>n===name);assert.equal(digest(await readFile(path.join(apps[index].inbox,saved))),digest(data));
     assert.equal(await row.locator('td').count(),4);await from.waitForFunction(()=>!document.querySelector('#files').disabled);files++;bytes+=data.length;
     console.log(`PC internet: ${name}, ${data.length} bytes, SHA-256 verified`);
   }

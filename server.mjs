@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
-import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, open, readFile, rename, rm, stat, statfs } from 'node:fs/promises';
+import { constants, createReadStream, createWriteStream } from 'node:fs';
+import { copyFile, link, mkdir, open, readFile, rename, rm, stat, statfs } from 'node:fs/promises';
 import { networkInterfaces, hostname } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,7 +25,7 @@ const fail = (status, message) => Object.assign(new Error(message), { status });
 export function safeName(value) {
   if (typeof value !== 'string' || !value.trim() || Buffer.byteLength(value, 'utf8') > 180 ||
       /[\x00-\x1f\x7f<>:"/\\|?*]/u.test(value) || /[. ]$/u.test(value) ||
-      /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/iu.test(value) ||
+      /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³]|conin\$|conout\$) *(?:\.|$)/iu.test(value) ||
       value === '.' || value === '..') {
     throw fail(400, 'Недопустимое имя файла. Переименуйте файл и повторите.');
   }
@@ -62,6 +62,23 @@ function fileSpec(data, maxSize) {
     throw fail(400, 'Недопустимый размер файла.');
   }
   return { name, size: data.size };
+}
+
+async function publishReceivedFile(temporary, folder, name) {
+  const extension = path.extname(name);
+  const stem = name.slice(0, name.length - extension.length);
+  for (let index = 0; ; index++) {
+    const destination = path.join(folder, index ? `${stem} (${index})${extension}` : name);
+    try {
+      try { await link(temporary, destination); }
+      catch (error) {
+        // Some removable or network drives do not support hard links.
+        if (!['EPERM', 'ENOSYS', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV'].includes(error.code)) throw error;
+        await copyFile(temporary, destination, constants.COPYFILE_EXCL);
+      }
+      return destination;
+    } catch (error) { if (error.code !== 'EEXIST') throw error; }
+  }
 }
 
 function openFolder(folder) {
@@ -187,7 +204,7 @@ export async function createApp({
     const id = randomUUID();
     active.add(id);
     const temporary = path.join(folder, `${id}.part`);
-    const final = path.join(folder, `${id}-${spec.name}`);
+    let final = path.join(folder, `${id}-${spec.name}`);
     let received = 0;
     try {
       const disk = await statfs(folder);
@@ -206,7 +223,8 @@ export async function createApp({
       });
       await pipeline(req, counter, createWriteStream(temporary, { flags: 'wx', mode: 0o600 }));
       if (received !== spec.size) throw fail(400, 'Файл получен не полностью.');
-      await rename(temporary, final);
+      if (folder === inbox) final = await publishReceivedFile(temporary, folder, spec.name);
+      else await rename(temporary, final);
       if (folder === inbox) {
         try { onFileReceived({ id: spec.id, name: spec.name }); }
         catch { /* A desktop notification must never fail a saved transfer. */ }

@@ -33,7 +33,7 @@ async function start(){
 }
 async function call(url,body,token=admin){const binary=Buffer.isBuffer(body);return fetch(origin+url,{method:body===undefined?'GET':'POST',headers:{Authorization:`Bearer ${token}`,...(body===undefined?{}:{'Content-Type':binary?'application/octet-stream':'application/json'})},body:body===undefined?undefined:binary?body:JSON.stringify(body)});}
 async function incoming(name,bytes,token,size=bytes.length){const offerResponse=await call('/api/offers',{name,size},token);assert.equal(offerResponse.status,201);const offer=await offerResponse.json();const response=await call(`/api/offers/${offer.id}/upload`,bytes,token);assert.equal(response.status,size===bytes.length?201:400);if(size===bytes.length)await saved(name,bytes);}
-async function saved(name,bytes){for(let i=0;i<120;i++){const file=(await readdir(inbox)).find(file=>file.endsWith('-'+name));if(file){assert.equal(digest(await readFile(path.join(inbox,file))),digest(bytes));return;}await pause(100);}throw new Error('Received file missing: '+name);}
+async function saved(name,bytes){for(let i=0;i<120;i++){const file=(await readdir(inbox)).find(file=>file===name);if(file){assert.equal(digest(await readFile(path.join(inbox,file))),digest(bytes));return;}await pause(100);}throw new Error('Received file missing: '+name);}
 async function count(expected,name){let state;for(let i=0;i<100;i++){state=await command('state');if(state.notifications.length>=expected)break;await pause(50);}assert.equal(state.notifications.length,expected);if(name){assert.equal(state.notifications.at(-1).title,'Получен файл');assert.ok(state.notifications.at(-1).text.includes(name));}return state;}
 async function preference(enabled){await openSettings(page);const checkbox=page.locator('#receive-notifications');await checkbox.setChecked(enabled);await page.waitForFunction(value=>!document.getElementById('receive-notifications').disabled&&document.getElementById('receive-notifications').checked===value,enabled);assert.ok(await page.locator('#connection-settings').evaluate(dialog=>dialog.scrollWidth<=dialog.clientWidth),'Settings must fit without horizontal scrolling');await page.locator('#connection-settings').screenshot({path:'artifacts/receive-notifications-settings.png'});await page.locator('[data-close-settings]').last().click();assert.equal((await command('state')).receiveNotifications,enabled);}
 async function stop(){await desktop.close();desktop=null;await command('exit');await nativeExited;}
@@ -49,7 +49,7 @@ try{
   await command('notification-click');await page.waitForFunction(()=>document.body.dataset.activePane==='transfer');assert.ok((await command('state')).visible);
   await preference(false);await command('minimize');await incoming('muted.bin',randomBytes(9),joined.token);await count(1);
   await command('open');await preference(true);await command('minimize');await incoming('empty.txt',Buffer.alloc(0),joined.token);await count(2,'empty.txt');
-  // Receive a remote PC share through WebView2's real download handler.
+  // Receive a remote PC share through the Windows download queue.
   await command('open');await selectDesktopLan(page);
   remote=await createApp({host:'127.0.0.1',port:0,storage:path.join(directory,'peer'),statistics:false,discovery:false,trustedLan:false});
   const remoteOrigin=new URL(remote.adminUrl).origin;
