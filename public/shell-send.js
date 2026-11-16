@@ -138,8 +138,18 @@
       } catch (error) { entry.state = 'failed'; entry.message = signal.aborted ? 'Отправка остановлена. Можно повторить.' : error.message; }
       render();
     }
-    busy = false; controller = null; render();
-    $('shell-status').textContent = signal.aborted ? 'Отправка остановлена.' : 'Обработка выбранных файлов завершена. Результат показан рядом с каждым файлом.';
+    busy = false; controller = null;
+    // Successful files are already tracked in the main transfer list, including shares awaiting download.
+    entries = entries.filter(entry => entry.state !== 'done');
+    render();
+    if (!entries.length && !signal.aborted) {
+      if (dialog.open) {
+        dialog.close();
+        window.NearbyWorkspace?.selectTab('transfer', true);
+      }
+    } else {
+      $('shell-status').textContent = signal.aborted ? 'Отправка остановлена.' : 'В списке остались файлы, которые ещё не отправлены.';
+    }
   });
   window.addEventListener('beforeunload', event => { if (busy) { event.preventDefault(); event.returnValue = ''; } });
   setInterval(() => { if (!document.hidden) void refreshTargets(); }, 1500);

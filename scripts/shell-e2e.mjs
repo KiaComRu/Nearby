@@ -33,7 +33,9 @@ try {
   await page.locator('#shell-reopen').click(); await page.waitForFunction(() => document.querySelector('#shell-target').options.length === 3);
   const chosen = (await call(sender, '/api/send-targets')).targets.find(item => item.name === 'Телефон А');
   await page.locator('#shell-target').selectOption(chosen.id); await page.locator('#shell-start').click();
-  await page.waitForFunction(() => [...document.querySelectorAll('.shell-file small')].length === 2 && [...document.querySelectorAll('.shell-file small')].every(item => item.textContent.includes('ожидает скачивания')));
+  await page.locator('#shell-send').waitFor({state:'hidden'});
+  assert.ok(await page.locator('#shell-reopen').isHidden());
+  assert.equal(await page.locator('#queue .file-row').count(), 2);
   const first = await call(sender, '/api/state', undefined, guestPages[0].token), second = await call(sender, '/api/state', undefined, guestPages[1].token);
   assert.equal(first.shares.length, 2); assert.equal(second.shares.length, 0);
   for (const item of first.shares) {
@@ -41,21 +43,32 @@ try {
     const downloaded = Buffer.from(await (await fetch(`http://127.0.0.1:${sender.port}` + url)).arrayBuffer());
     assert.equal(hash(downloaded), hash(item.size ? bytes : Buffer.alloc(0)));
   }
-  await page.locator('#shell-send').screenshot({ path: 'artifacts/nearby-shell-target-picker.png' });
-  await page.locator('#shell-clear').click();
   await call(sender, '/api/peer/connect', { address: `http://127.0.0.1:${receiver.port}`, pin: receiver.pin, device: 'ПК отправителя' });
   const receiverPage = await browser.newPage(); receiverPage.on('pageerror', error => errors.push(error.message)); await receiverPage.goto(receiver.adminUrl);
   await stage([source, empty]); await page.waitForFunction(() => document.querySelector('#shell-target').options.length === 4);
   const peer = (await call(sender, '/api/send-targets')).targets.find(item => item.kind === 'peer');
-  await page.locator('#shell-target').selectOption(peer.id); await page.locator('#shell-start').click();
-  await page.waitForFunction(() => [...document.querySelectorAll('.shell-file small')].every(item => item.textContent.includes('Получено и сохранено')));
+  await page.locator('#shell-target').selectOption(peer.id);
+  await page.locator('#shell-send').screenshot({ path: 'artifacts/nearby-shell-target-picker.png' });
+  const failedOfferRoute = '**/api/peer/remote/api/offers';
+  await page.route(failedOfferRoute, async route => {
+    if (route.request().postDataJSON().name === path.basename(empty)) return route.fulfill({status:503,json:{error:'Получатель временно недоступен.'}});
+    await route.continue();
+  });
+  await page.locator('#shell-start').click();
+  await page.waitForFunction(() => document.querySelector('#shell-send').open && document.querySelectorAll('.shell-file').length === 1 && document.querySelector('.shell-file small').textContent.includes('временно недоступен'));
+  assert.equal(await page.locator('.shell-file strong').textContent(), path.basename(empty));
+  assert.deepEqual(await readdir(receiver.inbox), [path.basename(source)]);
+  await page.unroute(failedOfferRoute);
+  await page.locator('#shell-start').click();
+  await page.locator('#shell-send').waitFor({state:'hidden'});
+  assert.ok(await page.locator('#shell-reopen').isHidden());
   const files = await readdir(receiver.inbox); assert.equal(files.length, 2);
   assert.ok((await Promise.all(files.map(name => readFile(path.join(receiver.inbox, name))))).some(data => hash(data) === hash(bytes)));
   assert.equal(await receiverPage.getByRole('button', { name: 'Принять', exact: true }).count(), 0);
+  await stage([empty]);
   await page.setViewportSize({ width: 390, height: 844 });
   assert.ok(await page.evaluate(() => document.querySelector('#shell-send').scrollWidth <= document.querySelector('#shell-send').clientWidth));
   await page.locator('#shell-send').screenshot({ path: 'artifacts/nearby-shell-target-picker-mobile.png' });
-  await page.locator('#shell-clear').click(); await stage([empty]);
   let releaseOffer;
   let confirmOffer;
   const offerIntercepted = new Promise(resolve => { confirmOffer = resolve; });
@@ -63,13 +76,16 @@ try {
   await page.route('**/api/peer/remote/api/offers', async route => { confirmOffer(); await delayedOffer; await route.continue().catch(() => {}); });
   await page.locator('#shell-start').click();
   await offerIntercepted;
+  await stage([source]); // A separate Explorer request arrives during this send.
   await page.locator('#shell-cancel').click();
   await page.waitForFunction(() => document.querySelector('.shell-file small')?.textContent.includes('Отправка остановлена'));
+  assert.ok(await page.locator('#shell-send').isVisible());
+  assert.equal(await page.locator('.shell-file').count(), 2);
   releaseOffer(); await page.unroute('**/api/peer/remote/api/offers');
   await call(sender, '/api/peer/disconnect', {});
   await call(sender, '/api/peer/connect', { address: `http://127.0.0.1:${receiver.port}`, pin: receiver.pin, device: 'ПК отправителя' });
   await page.waitForFunction(() => document.getElementById('shell-target').value === '' && document.getElementById('shell-start').disabled);
   assert.deepEqual(errors, []);
-  await writeFile('artifacts/Nearby-shell-ui-verification.json', JSON.stringify({ passed: true, retainedSelectionBeforeConnecting: true, simultaneousRecipients: 3, targetedPhoneShares: 2, unrelatedPhoneCannotSeeFiles: true, peerTransferSHA256: true, automaticReceiving: true, cancellation: true, reconnectDoesNotReplaceSelectedRecipient: true, widths: [1180,390], physicalDevices: false, checkedAt: new Date().toISOString() }, null, 2));
+  await writeFile('artifacts/Nearby-shell-ui-verification.json', JSON.stringify({ passed: true, retainedSelectionBeforeConnecting: true, simultaneousRecipients: 3, targetedPhoneShares: 2, unrelatedPhoneCannotSeeFiles: true, peerTransferSHA256: true, automaticReceiving: true, closesAfterSuccess: true, keepsFailedFilesForRetry: true, cancellation: true, keepsNewSelection: true, reconnectDoesNotReplaceSelectedRecipient: true, widths: [1180,390], physicalDevices: false, checkedAt: new Date().toISOString() }, null, 2));
   console.log('Explorer-send UI passed: retained selection, recipient choice, private binary/empty shares, automatic PC receiving with SHA-256 and cancellation.');
 } finally { await browser?.close(); await Promise.all([sender?.close(), receiver?.close()]); await rm(directory, { recursive: true, force: true }); }

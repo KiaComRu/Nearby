@@ -10,10 +10,11 @@ import assert from 'node:assert/strict';
 const directory = await mkdtemp(path.join(tmpdir(), 'nearby-shell-native-'));
 const port = await new Promise(resolve => { const server = net.createServer(); server.listen(0,'127.0.0.1', () => { const port = server.address().port; server.close(() => resolve(port)); }); });
 const stage = path.resolve('dist/windows-x64');
+const activationExe = path.join(stage,'ShellNativeActivation.exe');
 const hash = value => createHash('sha256').update(value).digest('hex');
 let native, browser, exited;
 async function activate(files) {
-  const process = spawn(path.join(stage,'Nearby.exe'), files.length ? ['--send', ...files] : [], { windowsHide: true, stdio: 'ignore' });
+  const process = spawn(activationExe, files.length ? ['--send', ...files] : [], { windowsHide: true, stdio: 'ignore' });
   const timeout = setTimeout(() => process.kill(), 20000);
   try { const [code] = await once(process,'exit'); assert.equal(code,0,'Activation must reach the existing instance'); } finally { clearTimeout(timeout); }
 }
@@ -37,16 +38,18 @@ try {
   const owner=await api('/api/state'); const joined=await api('/api/join',{pin:owner.pin,device:'Телефон для проверки'},'');await api('/api/state',undefined,joined.token);
   await Promise.all([activate([files[1]]),activate([files[2]])]);
   await page.waitForFunction(()=>document.querySelectorAll('.shell-file').length===3);
-  execFileSync(path.join(stage,'ShellNativeHarness.exe'),['--invoke-verb',path.join(stage,'Nearby.exe'),files[3]],{windowsHide:true,stdio:'pipe'});
+  execFileSync(path.join(stage,'ShellNativeHarness.exe'),['--invoke-verb',activationExe,files[3]],{windowsHide:true,stdio:'pipe'});
   await page.waitForFunction(()=>document.querySelectorAll('.shell-file').length===4);
   assert.equal(new URL(page.url()).origin,origin,'A second activation must keep the existing engine');
   await activate([]);assert.equal(await page.locator('.shell-file').count(),4);
   await page.waitForFunction(()=>!document.getElementById('shell-start').disabled);
-  await page.locator('#shell-start').click();await page.waitForFunction(()=>[...document.querySelectorAll('.shell-file small')].length===4&&[...document.querySelectorAll('.shell-file small')].every(item=>item.textContent.includes('ожидает скачивания')));
+  await page.locator('#shell-send').screenshot({path:'artifacts/nearby-shell-native-picker.png'});
+  await page.locator('#shell-start').click();await page.locator('#shell-send').waitFor({state:'hidden'});
+  assert.ok(await page.locator('#shell-reopen').isHidden());
+  assert.equal(await page.locator('#queue .file-row').count(),4);
   const offered=(await api('/api/state',undefined,joined.token)).shares;assert.equal(offered.length,4);
   for(const item of offered){const index=files.findIndex(file=>path.basename(file)===item.name);assert.ok(index>=0);const{url}=await api(`/api/shares/${item.id}/ticket`,{},joined.token);const bytes=Buffer.from(await(await fetch(origin+url)).arrayBuffer());assert.equal(hash(bytes),hash(contents[index]));}
-  await page.locator('#shell-send').screenshot({path:'artifacts/nearby-shell-native-picker.png'});
-  await writeFile('artifacts/Nearby-shell-native-verification.json',JSON.stringify({passed:true,realWinFormsWebView2:true,privateNamedPipe:true,initialFileBeforeReady:true,concurrentSecondaryActivations:2,registeredWindowsShellVerb:true,temporaryRegistryKeyRemoved:true,normalReactivation:true,existingConnectionPreserved:true,namesWithSpacesCyrillicAndMetacharacters:true,files:4,binaryAndEmptySHA256:true,statisticsDisabled:true,checkedAt:new Date().toISOString()},null,2));
+  await writeFile('artifacts/Nearby-shell-native-verification.json',JSON.stringify({passed:true,version:JSON.parse(await readFile('package.json','utf8')).version,realWinFormsWebView2:true,privateNamedPipe:true,initialFileBeforeReady:true,concurrentSecondaryActivations:2,registeredWindowsShellVerb:true,temporaryRegistryKeyRemoved:true,normalReactivation:true,existingConnectionPreserved:true,namesWithSpacesCyrillicAndMetacharacters:true,files:4,binaryAndEmptySHA256:true,closesAfterSuccess:true,statisticsDisabled:true,checkedAt:new Date().toISOString()},null,2));
   console.log('Native shell integration passed: registered Windows Shell verb, real WebView2 file injection, private IPC, concurrent activations, existing connection and four exact file hashes.');
 } finally {
   if(native?.stdin.writable)native.stdin.end('stop\n');
@@ -54,5 +57,5 @@ try {
   await browser?.close().catch(()=>{});
   assert.equal(path.dirname(directory),path.resolve(tmpdir()));
   await rm(directory,{recursive:true,force:true,maxRetries:20,retryDelay:250});
-  for(const name of ['ShellNativeHarness.exe','ShellNativeHarness.exe.config'])await rm(path.join(stage,name),{force:true});
+  for(const name of ['ShellNativeHarness.exe','ShellNativeHarness.exe.config','ShellNativeActivation.exe','ShellNativeActivation.exe.config'])await rm(path.join(stage,name),{force:true});
 }
