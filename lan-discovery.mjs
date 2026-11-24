@@ -15,6 +15,33 @@ export function privateIPv4(address) {
 export function discoveryInterfaces() {
   return [...new Map(Object.values(networkInterfaces()).flat().filter(item => item && item.family === 'IPv4' && !item.internal && privateIPv4(item.address)).map(item => [item.address, item])).values()];
 }
+
+function broadcastAddress({ address, netmask }) {
+  if (!isIPv4(netmask) || address.startsWith('127.')) return null;
+  const bits = netmask.split('.').map(part => Number(part).toString(2).padStart(8, '0')).join('');
+  if (!/^1{8,30}0{2,24}$/.test(bits)) return null;
+  const mask = netmask.split('.').map(Number);
+  const octets = address.split('.').map(Number);
+  const network = octets.map((value, index) => value & mask[index]).join('.');
+  const broadcast = octets.map((value, index) => value | (255 ^ mask[index])).join('.');
+  if (!privateIPv4(network) || !privateIPv4(broadcast) || address === network || address === broadcast) return null;
+  return broadcast;
+}
+
+async function sendBroadcast(socketFactory, data, address, destination, port) {
+  const sender = socketFactory();
+  // Bind the source so a VPN/default route cannot select a different adapter.
+  try {
+    await new Promise((resolve, reject) => {
+      sender.once('error', reject);
+      sender.bind(0, address, resolve);
+    });
+    sender.setBroadcast(true);
+    sender.setTTL(1);
+    await new Promise((resolve, reject) => sender.send(data, port, destination, error => error ? reject(error) : resolve()));
+  } finally { try { sender.close(); } catch {} }
+}
+
 export function discoveryName() {
   const mountains = ['Эльбрус', 'Дыхтау', 'Шхара', 'Коштантау', 'Казбек', 'Джангитау'];
   const platform = process.platform === 'win32' ? 'Windows' : process.platform === 'darwin' ? 'Mac' : 'Linux';
@@ -67,12 +94,12 @@ export function createLanDiscovery({ port, version, name = discoveryName(), id =
       pendingRefresh.unref?.();
     }
   }
-  function updateMemberships() {
+  function updateMemberships(rejoin) {
     const current = getInterfaces().filter(item => privateIPv4(item.address)).slice(0, 16);
     const addresses = new Set(current.map(item => item.address));
     if (interfaces.map(item => item.address).sort().join() !== [...addresses].sort().join()) peers.clear();
     interfaces = current;
-    for (const address of memberships) if (!addresses.has(address)) {
+    for (const address of memberships) if (rejoin || !addresses.has(address)) {
       try { socket.dropMembership(DISCOVERY_GROUP, address); } catch {}
       memberships.delete(address);
     }
@@ -82,23 +109,34 @@ export function createLanDiscovery({ port, version, name = discoveryName(), id =
     status = !interfaces.length ? 'no-network' : memberships.size ? 'listening' : 'unavailable';
     if (status === 'listening') errorCode = null;
   }
-  async function announce(type = 'announce') {
+  async function announce(type = 'announce', rejoin = false) {
     if (closed || busy || !socket) return;
+    const listener = socket;
     busy = true;
     try {
-      updateMemberships();
+      updateMemberships(rejoin);
       let sent = 0;
       const data = Buffer.from(JSON.stringify({ protocol, type, id, port, name, version, secure }));
       for (const address of memberships) {
-        if (closed) break;
+        if (closed || socket !== listener) break;
         try {
-          socket.setMulticastInterface(address);
-          await new Promise((resolve, reject) => socket.send(data, udpPort, DISCOVERY_GROUP, error => error ? reject(error) : resolve()));
+          listener.setMulticastInterface(address);
+          await new Promise((resolve, reject) => listener.send(data, udpPort, DISCOVERY_GROUP, error => error ? reject(error) : resolve()));
           lastAnnounce = now();
           sent++;
         } catch (error) { errorCode = error.code || 'UDP_ERROR'; status = 'unavailable'; }
       }
-      if (sent) { status = 'listening'; errorCode = null; }
+      for (const adapter of interfaces) {
+        if (closed || socket !== listener) break;
+        const destination = broadcastAddress(adapter);
+        if (!destination) continue;
+        try {
+          await sendBroadcast(socketFactory, data, adapter.address, destination, udpPort);
+          lastAnnounce = now();
+          sent++;
+        } catch (error) { errorCode = error.code || 'UDP_ERROR'; status = 'unavailable'; }
+      }
+      if (sent && socket === listener) { status = 'listening'; errorCode = null; }
     } catch (error) { errorCode = error.code || 'UDP_ERROR'; status = 'unavailable'; }
     finally { busy = false; }
   }
@@ -139,7 +177,7 @@ export function createLanDiscovery({ port, version, name = discoveryName(), id =
     async refresh() {
       if (now() - lastRefresh < 2000) return;
       lastRefresh = now();
-      if (!socket) { if (now() - lastRetry >= 15000) await start(); } else await announce('probe');
+      if (!socket) { if (now() - lastRetry >= 15000) await start(); } else await announce('probe', true);
     },
     async close() {
       if (closed) return;

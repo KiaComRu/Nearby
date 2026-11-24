@@ -3,6 +3,7 @@ import { mkdtemp, rm, readFile, readdir, mkdir, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomBytes, createHash } from 'node:crypto';
+import { createSocket } from 'node:dgram';
 import assert from 'node:assert/strict';
 import { createApp } from '../server.mjs';
 import { discoveryInterfaces } from '../lan-discovery.mjs';
@@ -11,9 +12,17 @@ const directory = await mkdtemp(path.join(tmpdir(), 'nearby-discovery-ui-'));
 const applications = []; let browser;
 const errors = [];
 const memoryBus = process.env.NEARBY_TEST_DISCOVERY_IN_MEMORY === '1' ? discoveryBus() : null;
+const broadcastOnly = !memoryBus && process.env.NEARBY_TEST_DISCOVERY_BROADCAST_ONLY === '1';
+function broadcastOnlySocket() {
+  const socket = createSocket({ type: 'udp4', reuseAddr: true });
+  socket.addMembership = () => { throw new Error('Multicast disabled for this check'); };
+  return socket;
+}
 try {
   if (!memoryBus) assert.ok(discoveryInterfaces().length, 'A private IPv4 adapter is required to test real UDP discovery');
-  for (const name of ['Первый тестовый ПК', 'Второй тестовый ПК']) applications.push(await createApp({ host: '0.0.0.0', port: 0, statistics: false, trustedLan: false, storage: path.join(directory, String(applications.length)), discovery: { name, ...(memoryBus ? { socketFactory: () => memoryBus.createSocket(), getInterfaces: () => [{ address: '127.0.0.1' }] } : {}) } }));
+  const reserved = createSocket('udp4');
+  const udpPort = await new Promise(resolve => reserved.bind(0, '0.0.0.0', () => { const port = reserved.address().port; reserved.close(() => resolve(port)); }));
+  for (const name of ['Первый тестовый ПК', 'Второй тестовый ПК']) applications.push(await createApp({ host: '0.0.0.0', port: 0, statistics: false, trustedLan: false, storage: path.join(directory, String(applications.length)), discovery: { name, udpPort, ...(memoryBus ? { socketFactory: () => memoryBus.createSocket(), getInterfaces: () => [{ address: '127.0.0.1' }] } : broadcastOnly ? { socketFactory: broadcastOnlySocket } : {}) } }));
   const [first, second] = applications;
   browser = await chromium.launch({ headless: true });
   const [host, client] = await Promise.all([browser.newPage(), browser.newPage()]);
@@ -57,6 +66,6 @@ try {
   await client.locator('#pc-diagnostic-state[data-code="connection-refused"]').waitFor({ timeout: 10000 });
   await client.waitForFunction(() => !document.querySelector('#nearby-devices').textContent.includes('Первый тестовый ПК'), null, { timeout: 25000 });
   assert.deepEqual(errors, []);
-  await writeFile(`artifacts/Nearby-discovery-${memoryBus ? 'ci-' : ''}verification.json`, JSON.stringify({ passed: true, actualUdpMulticast: !memoryBus, twoIndependentEngines: true, selectionAndPin: true, privateAddressReachability: !memoryBus, fileBytes: bytes.length, sha256Match: true, departureAndDiagnosis: true, mobileWidth: 390, limitations: 'Two engines on one PC; physical devices and particular router/firewall still require testing', testedAt: new Date().toISOString() }, null, 2));
-  console.log(`${memoryBus ? 'Simulated discovery' : 'Real UDP discovery'} UI passed: two engines, choose PC, diagnosis, PIN, 1 MiB SHA-256 transfer, departure, refusal and mobile layout.`);
+  await writeFile(`artifacts/Nearby-discovery-${memoryBus ? 'ci-' : broadcastOnly ? 'broadcast-' : ''}verification.json`, JSON.stringify({ passed: true, actualUdp: !memoryBus, broadcastOnly, twoIndependentEngines: true, selectionAndPin: true, privateAddressReachability: !memoryBus, fileBytes: bytes.length, sha256Match: true, departureAndDiagnosis: true, mobileWidth: 390, limitations: 'Two engines on one PC; physical devices and particular router/firewall still require testing', testedAt: new Date().toISOString() }, null, 2));
+  console.log(`${memoryBus ? 'Simulated discovery' : broadcastOnly ? 'Real broadcast without multicast' : 'Real UDP discovery'} UI passed: two engines, choose PC, diagnosis, PIN, 1 MiB SHA-256 transfer, departure, refusal and mobile layout.`);
 } finally { await browser?.close(); await Promise.all(applications.map(app => app.close())); await rm(directory, { recursive: true, force: true }); }

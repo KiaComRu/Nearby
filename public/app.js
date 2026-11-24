@@ -508,14 +508,14 @@ async function refreshDiscovery() {
     discoveredDevices = result.devices; renderTrust();
     const statuses = {
       starting: 'Запускаем поиск устройств…',
-      listening: result.devices.length ? `Найдено компьютеров: ${result.devices.length}. Выберите нужный.` : 'Откройте Nearby на другом компьютере в этой сети.',
+      listening: result.devices.length ? `Найдено компьютеров: ${result.devices.length}. Выберите нужный.` : 'Откройте Nearby на другом ПК. Если оба ПК в одной домашней сети, проверьте на обоих профиль «Частная сеть» и разрешение Nearby в брандмауэре. Можно подключиться по адресу.',
       'no-network': 'Нет доступной локальной IPv4-сети. Подключите ПК к Wi-Fi или Ethernet; поиск обновится автоматически.',
       unavailable: result.errorCode === 'EADDRINUSE' ? 'Порт поиска занят. Подключитесь по адресу; поиск повторится автоматически.' : 'Поиск устройств недоступен. Проверьте сеть и разрешение Nearby в брандмауэре. Можно подключиться по адресу.',
       disabled: 'Автопоиск отключён в этом запуске. Подключитесь по адресу.',
     };
     $('discovery-state').textContent = statuses[result.status] || 'Не удалось получить состояние поиска.';
     $('discovery-empty').hidden = result.devices.length > 0;
-    $('discovery-name').textContent = result.name ? `Этот ПК виден в сети как «${result.name}». PIN и имена файлов в поиске не передаются.` : '';
+    $('discovery-name').textContent = result.name ? `Имя этого ПК для поиска — «${result.name}». PIN и имена файлов в поиске не передаются.` : '';
     const signature = JSON.stringify(result.devices);
     if (signature === discoverySignature) return;
     discoverySignature = signature; $('nearby-devices').replaceChildren();

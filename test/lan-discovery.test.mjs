@@ -50,6 +50,40 @@ test('discovery rebinds when network changes and socket errors do not stop the a
   } finally { await service.close(); }
 });
 
+test('two PCs discover each other over local broadcast when multicast packets do not arrive', async () => {
+  const bus = discoveryBus({ dropMulticast: true });
+  const broadcasts = [];
+  const socketFactory = () => {
+    const socket = bus.createSocket();
+    const send = socket.send;
+    socket.send = (data, port, destination, done) => {
+      if (destination !== '239.255.53.17') broadcasts.push([socket.addressValue, destination]);
+      send(data, port, destination, done);
+    };
+    return socket;
+  };
+  const options = { version: '0.6.11', socketFactory, intervalMs: 60000 };
+  const first = createLanDiscovery({ ...options, port: 3001, name: 'First', getInterfaces: () => [
+    { address: '192.168.31.69', netmask: '255.255.255.0' },
+    { address: '10.20.30.40', netmask: '128.0.0.0' },
+    { address: '10.0.0.3', netmask: '255.255.255.255' },
+  ] });
+  await first.ready;
+  const second = createLanDiscovery({ ...options, port: 3002, name: 'Second', getInterfaces: () => [{ address: '192.168.31.70', netmask: '255.255.255.0' }] });
+  try {
+    await second.ready;
+    await first.refresh();
+    assert.deepEqual(first.state.devices.map(peer => peer.origins), [['http://192.168.31.70:3002']]);
+    assert.deepEqual(second.state.devices.map(peer => peer.origins), [['http://192.168.31.69:3001']]);
+    assert.deepEqual(broadcasts, [
+      ['192.168.31.69', '192.168.31.255'],
+      ['192.168.31.70', '192.168.31.255'],
+      ['192.168.31.69', '192.168.31.255'],
+    ]);
+    assert.equal(bus.sockets.size, 2, 'only the two listeners stay open');
+  } finally { await first.close(); await second.close(); }
+});
+
 test('discovery caps untrusted device lists and refresh broadcasts', async () => {
   const bus = discoveryBus(); let time = 30000;
   const service = createLanDiscovery({ port: 1234, version: '0.4.0', socketFactory: () => bus.createSocket(), getInterfaces: () => [{ address: '192.168.1.2' }], now: () => time, intervalMs: 60000 });

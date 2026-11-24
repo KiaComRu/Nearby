@@ -16,8 +16,8 @@ using Microsoft.Web.WebView2.WinForms;
 
 [assembly: System.Reflection.AssemblyTitle("Nearby")]
 [assembly: System.Reflection.AssemblyDescription("Передача файлов по локальной сети")]
-[assembly: System.Reflection.AssemblyVersion("0.6.10.0")]
-[assembly: System.Reflection.AssemblyFileVersion("0.6.10.0")]
+[assembly: System.Reflection.AssemblyVersion("0.6.11.0")]
+[assembly: System.Reflection.AssemblyFileVersion("0.6.11.0")]
 
 internal static class Program
 {
